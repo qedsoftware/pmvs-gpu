@@ -12,7 +12,8 @@ class CphotoSetS {
   virtual ~CphotoSetS();
 
   void init(const std::vector<int>& images, const std::string prefix,
-            const int maxLevel, const int size, const int alloc, cl_context clCtx = NULL);
+            const int maxLevel, const int size, const int alloc,
+            cl_context clCtx = NULL, cl_device_id clDevice = NULL);
   
   // grabTex given 2D sampling information
   void grabTex(const int index, const int level, const Vec2f& icoord,
@@ -92,6 +93,10 @@ class CphotoSetS {
   // pairwise distance based on optical center and viewing direction
   void setDistances(void);
   std::vector<std::vector<float> > m_distances;
+
+  // CL image
+  cl_mem m_clImageArray;
+
  protected:  
 }; 
  

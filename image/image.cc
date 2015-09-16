@@ -18,13 +18,9 @@ using namespace Image;
 
 Cimage::Cimage(void) {
   m_alloc = 0;
-  m_clImage = NULL;
 }
 
 Cimage::~Cimage() {
-    if(m_clImage != NULL) {
-        clReleaseMemObject(m_clImage);
-    }
 }
 
 void Cimage::completeName(const std::string& lhs, std::string& rhs,
@@ -82,7 +78,7 @@ void Cimage::init(const std::string name, const std::string mname,
     completeName(ename, m_ename, 0);
 }
 
-void Cimage::alloc(cl_context clCtx, const int fast, const int filter) {
+void Cimage::alloc(const int fast, const int filter) {
   if (m_alloc == 1 && fast == 1)
     return;
   if (m_alloc == 2)
@@ -105,16 +101,6 @@ void Cimage::alloc(cl_context clCtx, const int fast, const int filter) {
     return;
   }
 
-  if(clCtx != NULL) {
-      unsigned char *imData = m_images[0].data();
-      cl_int clErr;
-      cl_image_format clFormat;
-      clFormat.image_channel_order = CL_RGB;
-      clFormat.image_channel_data_type = CL_UNORM_INT8;
-      m_clImage = clCreateImage2D(clCtx, CL_MEM_READ_ONLY, &clFormat, m_widths[0], m_heights[0], 0, imData, &clErr);
-      printf("created CL image %d\n", clErr);
-  }
-  
 #ifdef FURUKAWA_IMAGE_GAMMA
   m_dimages.resize(m_maxLevel);
   decodeGamma();

@@ -13,13 +13,16 @@ CphotoSetS::~CphotoSetS() {
 
 
 void CphotoSetS::init(const std::vector<int>& images, const std::string prefix,
-                      const int maxLevel, const int size, const int alloc, cl_context clCtx) {
+                      const int maxLevel, const int size, const int alloc, cl_context clCtx,
+                      cl_device_id clDevice) {
   m_images = images;
   m_num = (int)images.size();
   
   for (int i = 0; i < (int)images.size(); ++i)
     m_dict[images[i]] = i;
-  
+
+  int maxWidth = 0;
+  int maxHeight = 0;
   m_prefix = prefix;
   m_maxLevel = max(1, maxLevel);
   m_photos.resize(m_num);
@@ -40,10 +43,12 @@ void CphotoSetS::init(const std::vector<int>& images, const std::string prefix,
       sprintf(cname, "%stxt/%08d.txt", prefix.c_str(), image);
       
       m_photos[index].init(name, mname, ename, cname, m_maxLevel);        
-      if (alloc)
-        m_photos[index].alloc(clCtx);
+      if (alloc) {
+        m_photos[index].alloc();
+        unsigned char *imData = m_photos[index].imData();
+      }
       else
-        m_photos[index].alloc(clCtx, 1);
+        m_photos[index].alloc(1);
       cerr << '*' << flush;
     }
     // try 4 digits
@@ -58,10 +63,17 @@ void CphotoSetS::init(const std::vector<int>& images, const std::string prefix,
       
       m_photos[index].init(name, mname, ename, cname, m_maxLevel);        
       if (alloc)
-        m_photos[index].alloc(clCtx);
+        m_photos[index].alloc();
       else
-        m_photos[index].alloc(clCtx, 1);
+        m_photos[index].alloc(1);
       cerr << '*' << flush;
+    }
+
+    if(m_photos[index].getWidth() > maxWidth) {
+        maxWidth = m_photos[index].getWidth();
+    }
+    if(m_photos[index].getHeight() > maxHeight) {
+        maxHeight = m_photos[index].getHeight();
     }
 
     /*
@@ -85,6 +97,39 @@ void CphotoSetS::init(const std::vector<int>& images, const std::string prefix,
   cerr << endl;
   const int margin = size / 2;
   m_size = 2 * margin + 1;
+
+  printf("maxWidth %d maxHeight %d\n", maxWidth, maxHeight);
+
+  if(clCtx != NULL && alloc) {
+      cl_int clErr;
+      cl_image_format imFormat = {CL_RGB, CL_UNORM_INT8};
+      cl_image_desc imDesc = {
+          CL_MEM_OBJECT_IMAGE2D_ARRAY,
+          maxWidth, maxHeight, 1, m_num,
+          0, 0, 0, 0, NULL};
+
+      m_clImageArray = clCreateImage(clCtx,
+              CL_MEM_READ_ONLY,
+              &imFormat,
+              &imDesc, 
+              NULL,
+              &clErr);
+      printf("created CL image array %x\n", clErr);
+
+      cl_command_queue clQueue = clCreateCommandQueue(clCtx, clDevice, 0, &clErr);
+
+      for(int i=0; i<m_num; i++) {
+          size_t origin[] = {0,0,i};
+          size_t region[] = {m_photos[i].getWidth(), m_photos[i].getHeight(), 1};
+          clEnqueueReadImage(clQueue, m_clImageArray, CL_FALSE,
+                  origin, region, 0, 0,
+                  m_photos[i].imData(), NULL, 0, NULL);
+      }
+
+      clFinish(clQueue);
+      clReleaseCommandQueue(clQueue);
+  }
+  
 }
 
 void CphotoSetS::free(void) {

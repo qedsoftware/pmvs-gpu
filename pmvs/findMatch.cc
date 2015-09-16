@@ -75,7 +75,7 @@ void CfindMatch::init(const Soption& option) {
     pthread_rwlock_init(&m_countLocks[image], NULL);
   }
   // We set m_level + 3, to use multi-resolutional texture grabbing
-  m_pss.init(m_images, m_prefix, m_level + 3, m_wsize, 1, m_clCtx);
+  m_pss.init(m_images, m_prefix, m_level + 3, m_wsize, 1, m_clCtx, m_clDevice);
 
   if (m_setEdge != 0.0f)
     m_pss.setEdge(m_setEdge);

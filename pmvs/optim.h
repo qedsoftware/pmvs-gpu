@@ -196,6 +196,17 @@ class Coptim {
   std::vector<std::vector<double> > m_worksT;
   
 };
+
+/*
+const unsigned char *refinePatchCLProgram = "#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable\n"
+STRINGIZE(
+   __sampler_t image1 = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
+   __kernel void hello(__global char * out) {
+       size_t tid = get_global_id(0);
+       out[tid] = hw[tid];
+   }
+);
+*/
 };
 
 #endif // PMVS3_OPTIM_H

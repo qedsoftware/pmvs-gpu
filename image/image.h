@@ -61,7 +61,7 @@ class Cimage {
   
   //allocate and free memories, this function is also called when you call
   //getColor/getMask when the memory is not allocated
-  void alloc(cl_context clCtx, const int fast = 0, const int filter = 0);
+  void alloc(const int fast = 0, const int filter = 0);
   // free memory
   void free(void);
   // free memory below the specified level
@@ -157,6 +157,8 @@ class Cimage {
   static void setInOutHSV(const std::vector<Vec3f>& hsvs, std::vector<int>& inout,
 			  const float sigma = 1.0f, const int specular = 0);
   */
+
+  unsigned char *imData() {return m_images[0].data();};
  protected:
   //----------------------------------------------------------------------
   // member functions
@@ -189,8 +191,6 @@ class Cimage {
   // a pyramid of images specifying regions with edges(texture)
   std::vector<std::vector<unsigned char> > m_edges;
 
-  cl_mem m_clImage;
-  
   // width of an image in each level
   std::vector<int> m_widths;
   // height of an image in each level
