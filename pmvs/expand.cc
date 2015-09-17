@@ -1,6 +1,9 @@
 #include <algorithm>
 #include <numeric>
 #include <iterator>
+#include <string>
+#include <sstream>
+#include <fstream>
 #include "expand.h"
 #include "findMatch.h"
 
@@ -15,6 +18,7 @@ void Cexpand::init(void) {
 }
 
 void Cexpand::run(void) {
+  initCLProgram();
   m_fm.m_count = 0;
   m_fm.m_jobs.clear();
   m_ecounts.resize(m_fm.m_CPU);
@@ -64,6 +68,43 @@ void Cexpand::run(void) {
        << 100 * (pass + fail1) / (float)trial << endl;
   
 }
+
+void Cexpand::initCLProgram(void) {
+    std::ifstream t("/home/jkevin/src/OpenDroneMap/src/cmvs/program/base/pmvs/refinePatch.cl");
+    std::stringstream buffer;
+    buffer << t.rdbuf();
+    std::string pstr = buffer.str();
+    const char *pcstr = pstr.c_str();
+    size_t pstrlen = pstr.length();
+    cl_int clErr;
+    m_clProgram = clCreateProgramWithSource(m_fm.m_pss.m_clCtx, 1, &pcstr, &pstrlen, &clErr);
+    printf("%s\n", pcstr);
+    printf("created cl program %d\n", clErr);
+
+    clBuildProgram(m_clProgram, 1, &m_fm.m_pss.m_clDevice, NULL, NULL, NULL);
+    cl_build_status buildStatus;
+    clGetProgramBuildInfo(m_clProgram, m_fm.m_pss.m_clDevice,
+            CL_PROGRAM_BUILD_STATUS, sizeof(cl_build_status), 
+            &buildStatus, NULL);
+    if(buildStatus != CL_BUILD_SUCCESS) {
+        printf("error building program %d\n", buildStatus);
+        char *buildLog = (char *)malloc(50*1024);
+        clErr = clGetProgramBuildInfo(m_clProgram, m_fm.m_pss.m_clDevice,
+                CL_PROGRAM_BUILD_LOG, 50*1024, buildLog, NULL);
+        printf("got build info %d\n", clErr);
+        printf("%s\n", buildLog);
+        free(buildLog);
+        std::exit(0);
+    }
+    else {
+        printf("successfully built program\n");
+    }
+
+    for(int id=0; id<m_fm.m_CPU; id++) {
+        m_fm.m_optim.initThreadCL(id, m_clProgram);
+    }
+}
+
 void* Cexpand::expandThreadTmp(void* arg) {
   ((Cexpand*)arg)->expandThread();
   return NULL;
@@ -73,17 +114,6 @@ void Cexpand::expandThread(void) {
   pthread_rwlock_wrlock(&m_fm.m_lock);
   const int id = m_fm.m_count++;
   pthread_rwlock_unlock(&m_fm.m_lock);
-
-  int err;
-
-  cl_command_queue clQueue = clCreateCommandQueue(m_fm.m_clCtx, m_fm.m_clDevice, 0, &err);
-  if(err < 0) {
-      printf("couldn't create command queue %d\n", err);
-  }
-  else {
-      printf("opencl queue created successfully\n");
-  }
-      
 
   while (1) {
     Ppatch ppatch;
@@ -106,7 +136,7 @@ void Cexpand::expandThread(void) {
 
     for (int i = 0; i < (int)canCoords.size(); ++i) {
       for (int j = 0; j < (int)canCoords[i].size(); ++j) {
-        const int flag = expandSub(ppatch, id, canCoords[i][j], &clQueue);
+        const int flag = expandSub(ppatch, id, canCoords[i][j]);
         // fail
         if (flag)
           ppatch->m_dflag |= (0x0001) << i;
@@ -213,7 +243,7 @@ float Cexpand::computeRadius(const Patch::Cpatch& patch) {
 }
 
 int Cexpand::expandSub(const Ppatch& orgppatch, const int id,
-                       const Vec4f& canCoord, cl_command_queue *clQueue) {
+                       const Vec4f& canCoord) {
   // Choose the closest one
   Cpatch patch;
   patch.m_coord = canCoord;
@@ -250,6 +280,7 @@ int Cexpand::expandSub(const Ppatch& orgppatch, const int id,
 
   //-----------------------------------------------------------------
   m_fm.m_optim.refinePatch(patch, id, 100);
+  m_fm.m_optim.refinePatchGPU(patch, id, 100);
 
   //-----------------------------------------------------------------
   if (m_fm.m_optim.postProcess(patch, id, 0)) {

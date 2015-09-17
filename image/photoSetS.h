@@ -12,8 +12,7 @@ class CphotoSetS {
   virtual ~CphotoSetS();
 
   void init(const std::vector<int>& images, const std::string prefix,
-            const int maxLevel, const int size, const int alloc,
-            cl_context clCtx = NULL, cl_device_id clDevice = NULL);
+            const int maxLevel, const int size, const int alloc);
   
   // grabTex given 2D sampling information
   void grabTex(const int index, const int level, const Vec2f& icoord,
@@ -27,8 +26,8 @@ class CphotoSetS {
                const int normalizef = 1) const;
   
   void write(const std::string outdir);
-  void free(void);
-  void free(const int level);
+  void freePhotoSet(void);
+  void freePhotoSet(const int level);
 
   void setEdge(const float threshold);
 
@@ -94,8 +93,16 @@ class CphotoSetS {
   void setDistances(void);
   std::vector<std::vector<float> > m_distances;
 
-  // CL image
+  static void rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out);
+
+  // OpenCL
+  void initCL();
+  cl_context m_clCtx;
+  cl_device_id m_clDevice;
+
+  // CL image data
   cl_mem m_clImageArray;
+  cl_mem m_clImageProjections;
 
  protected:  
 }; 

@@ -30,7 +30,6 @@ void CfindMatch::updateThreshold(void) {
 }
 
 void CfindMatch::init(const Soption& option) {
-  initCL();
   m_timages = option.m_timages;
   m_oimages = option.m_oimages;
   m_images.clear();
@@ -75,7 +74,7 @@ void CfindMatch::init(const Soption& option) {
     pthread_rwlock_init(&m_countLocks[image], NULL);
   }
   // We set m_level + 3, to use multi-resolutional texture grabbing
-  m_pss.init(m_images, m_prefix, m_level + 3, m_wsize, 1, m_clCtx, m_clDevice);
+  m_pss.init(m_images, m_prefix, m_level + 3, m_wsize, 1);
 
   if (m_setEdge != 0.0f)
     m_pss.setEdge(m_setEdge);
@@ -113,24 +112,6 @@ void CfindMatch::init(const Soption& option) {
   m_quadThreshold = option.m_quadThreshold;
   
   m_epThreshold = 2.0f;
-}
-
-void CfindMatch::initCL() {
-    cl_uint numPlatforms, numDevices;
-    cl_int cl_err;
-    cl_platform_id platforms[1];
-    cl_device_id devices[1];
-    clGetPlatformIDs(1, platforms, &numPlatforms);
-    const cl_context_properties cl_props[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platforms[0], 0};
-    clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_GPU, 1, devices, &numDevices);
-    m_clCtx = clCreateContext(cl_props, 1, devices, NULL, NULL, &cl_err);
-    if(cl_err == CL_SUCCESS) {
-        printf("OpenCL context created successfully\n");
-    }
-    else {
-        printf("OpenCL error creating context %d\n", cl_err);
-    }
-    m_clDevice = devices[0];
 }
 
 int CfindMatch::insideBimages(const Vec4f& coord) const {

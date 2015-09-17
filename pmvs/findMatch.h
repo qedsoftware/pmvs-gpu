@@ -156,10 +156,6 @@ class CfindMatch {
   // Patch optimizer
   Coptim m_optim;
 
-  // OpenCL
-  cl_context m_clCtx;
-  cl_device_id m_clDevice;
-
   int m_debug;
  protected:
   void init(void);

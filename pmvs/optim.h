@@ -14,6 +14,8 @@ class Coptim {
   Coptim(CfindMatch& findMatch);
 
   void init(void);
+  void initThreadCL(int id, cl_program clProgram);
+  void destroyCL();
 
   //-----------------------------------------------------------------
   // Image manipulation
@@ -178,12 +180,16 @@ class Coptim {
   
   //-----------------------------------------------------------------
   // For threads
-  std::vector<float> m_vect0T;  
   std::vector<Vec4f> m_centersT;
   std::vector<Vec4f> m_raysT;
   std::vector<std::vector<int> > m_indexesT;
   std::vector<float> m_dscalesT;
   std::vector<float> m_ascalesT;
+  std::vector<cl_command_queue> m_clQueuesT;
+  std::vector<cl_kernel> m_clKernelsT;
+  std::vector<cl_event> m_clEventsT;
+  std::vector<cl_mem> m_clIndexesT;
+  std::vector<cl_mem> m_clPatchVecsT;
 
   // stores current parameters for derivative computation
   std::vector<Vec3f> m_paramsT;
@@ -197,16 +203,6 @@ class Coptim {
   
 };
 
-/*
-const unsigned char *refinePatchCLProgram = "#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable\n"
-STRINGIZE(
-   __sampler_t image1 = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
-   __kernel void hello(__global char * out) {
-       size_t tid = get_global_id(0);
-       out[tid] = hw[tid];
-   }
-);
-*/
 };
 
 #endif // PMVS3_OPTIM_H

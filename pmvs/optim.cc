@@ -19,13 +19,17 @@ Coptim::Coptim(CfindMatch& findMatch) : m_fm(findMatch) {
 }
 
 void Coptim::init(void) {
-  m_vect0T.resize(m_fm.m_CPU);
   m_centersT.resize(m_fm.m_CPU);
   m_raysT.resize(m_fm.m_CPU);
   m_indexesT.resize(m_fm.m_CPU);
   m_dscalesT.resize(m_fm.m_CPU);
   m_ascalesT.resize(m_fm.m_CPU);
   m_paramsT.resize(m_fm.m_CPU);
+  m_clQueuesT.resize(m_fm.m_CPU);
+  m_clKernelsT.resize(m_fm.m_CPU);
+  m_clEventsT.resize(m_fm.m_CPU);
+  m_clIndexesT.resize(m_fm.m_CPU);
+  m_clPatchVecsT.resize(m_fm.m_CPU);
   
   m_texsT.resize(m_fm.m_CPU);
   m_weightsT.resize(m_fm.m_CPU);
@@ -38,6 +42,72 @@ void Coptim::init(void) {
   }
   
   setAxesScales();
+}
+
+void Coptim::initThreadCL(int id, cl_program clProgram) {
+  cl_int clErr;
+
+  m_clQueuesT[id] = clCreateCommandQueue(m_fm.m_pss.m_clCtx, m_fm.m_pss.m_clDevice, 0, &clErr);
+  if(clErr < 0) {
+      printf("couldn't create command queue %d\n", clErr);
+  }
+  else {
+      printf("opencl queue created successfully\n");
+  }
+
+  m_clKernelsT[id] = clCreateKernel(clProgram, "refinePatch", &clErr);
+  if(clErr < 0) {
+      printf("error creating opencl kernel %d\n", clErr);
+  }
+
+  // set kernel args that don't change
+  clErr = clSetKernelArg(m_clKernelsT[id], 0, sizeof(cl_mem), &m_fm.m_pss.m_clImageArray);
+  if(clErr < 0) {
+      printf("error setKernelArg 0 %d\n", clErr);
+  }
+  clErr = clSetKernelArg(m_clKernelsT[id], 1, sizeof(cl_mem), &m_fm.m_pss.m_clImageProjections);
+  if(clErr < 0) {
+      printf("error setKernelArg 1 %d\n", clErr);
+  }
+
+  m_clIndexesT[id] = clCreateBuffer(m_fm.m_pss.m_clCtx, CL_MEM_READ_ONLY, m_fm.m_pss.m_num * sizeof(int), NULL, &clErr);
+  if(clErr < 0) {
+      printf("error createBuffer indexes %d\n", clErr);
+  }
+  m_clPatchVecsT[id] = clCreateBuffer(m_fm.m_pss.m_clCtx, CL_MEM_READ_WRITE, 3 * sizeof(float), NULL, &clErr);
+  if(clErr < 0) {
+      printf("error createBuffer patchVecs %d\n", clErr);
+  }
+
+  clSetKernelArg(m_clKernelsT[id], 6, sizeof(cl_mem), &m_clIndexesT[id]);
+  if(clErr < 0) {
+      printf("error setKernelArg 6 %d\n", clErr);
+  }
+  clSetKernelArg(m_clKernelsT[id], 7, sizeof(cl_mem), &m_clPatchVecsT[id]);
+  if(clErr < 0) {
+      printf("error setKernelArg 7 %d\n", clErr);
+  }
+
+  m_clEventsT[id] = clCreateUserEvent(m_fm.m_pss.m_clCtx, &clErr);
+  if(clErr < 0) {
+      printf("error createUserEvent %d\n", clErr);
+  }
+
+  cl_kernel refineKernel = m_clKernelsT[id];
+
+  /*
+  float testVec[4];
+  float t=0;
+  clSetKernelArg(refineKernel, 2, 4*sizeof(float), testVec);
+  clSetKernelArg(refineKernel, 3, 4*sizeof(float), testVec);
+  clSetKernelArg(refineKernel, 4, sizeof(float), &t);
+  clSetKernelArg(refineKernel, 5, sizeof(float), &t);
+  clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, &m_clEventsT[id]);
+  printf("enqueue task %d\n", clErr);
+  */
+}
+
+void Coptim::destroyCL() {
 }
 
 void Coptim::setAxesScales(void) {
@@ -516,7 +586,6 @@ void Coptim::computeUnits(const Patch::Cpatch& patch,
 void Coptim::refinePatch(Cpatch& patch, const int id,
                          const int time) {
   refinePatchBFGS(patch, id, 1000, 1);
-  refinePatchGPU(patch, id, 1000);
 
   // WORKED REALLY WELL
   if (patch.m_images.empty())
@@ -1089,16 +1158,20 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
 void Coptim::refinePatchGPU(Cpatch& patch, const int id,
                              const int time) {
   int status;
-  int idtmp = id;
+  cl_int clErr;
   
-  m_centersT[id] = patch.m_coord;
-  m_raysT[id] = patch.m_coord -
-    m_fm.m_pss.m_photos[patch.m_images[0]].m_center;
-  unitize(m_raysT[id]);
+  float centerVec[4];
+  for(int i=0; i<4; i++) centerVec[i] = patch.m_coord[i];
+
+  Vec4f rayTmp = patch.m_coord -
+        m_fm.m_pss.m_photos[patch.m_images[0]].m_center;
+  unitize(rayTmp);
+  float rayVec[4];
+  for(int i=0; i<4; i++) rayVec[i] = rayTmp[i];
+
   m_indexesT[id] = patch.m_images;
   
-  m_dscalesT[id] = patch.m_dscale;
-  m_ascalesT[id] = M_PI / 48.0f;//patch.m_ascale;
+  float ascale = M_PI / 48.0f;//patch.m_ascale;
   
   computeUnits(patch, m_weightsT[id]);
   for (int i = 1; i < (int)m_weightsT[id].size(); ++i)
@@ -1108,8 +1181,25 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   double p[3];
   encode(patch.m_coord, patch.m_normal, p, id);
 
+  float pf[3];
+  for(int i=0; i<3; i++) pf[i] = p[i];
+
+  cl_kernel refineKernel = m_clKernelsT[id];
+  cl_event refineEvent = m_clEventsT[id];
+
+  clSetKernelArg(refineKernel, 2, 4*sizeof(float), centerVec);
+  clSetKernelArg(refineKernel, 3, 4*sizeof(float), rayVec);
+  clSetKernelArg(refineKernel, 4, sizeof(float), &patch.m_dscale);
+  clSetKernelArg(refineKernel, 5, sizeof(float), &ascale);
+
   // call GPU min`and store result to p
   // return status messages similar to GSL
+  //
+  
+  clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, &refineEvent);
+  printf("enqueue task %d\n", clErr);
+  clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], true, 0, 3*sizeof(float), pf, 1, &refineEvent, NULL);
+  printf("buffer val %d %f\n", clErr, pf[0]);
   
   //status = GSL_SUCCESS;
 
