@@ -171,7 +171,7 @@ void Coptim::initCLImageArray(cl_command_queue clQueue) {
         rgbToRGBA(imWidth, imHeight, m_fm.m_pss.m_photos[i].imData(), rgbaBuffer);
         size_t origin[] = {0,0,i};
         size_t region[] = {imWidth, imHeight, 1};
-        clEnqueueReadImage(clQueue, m_clImageArray, CL_FALSE,
+        clEnqueueWriteImage(clQueue, m_clImageArray, CL_FALSE,
                 origin, region, 0, 0,
                 rgbaBuffer, NULL, 0, NULL);
     }
