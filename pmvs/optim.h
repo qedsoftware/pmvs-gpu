@@ -14,6 +14,7 @@ class Coptim {
   Coptim(CfindMatch& findMatch);
 
   void init(void);
+  void axesToBuffer(std::vector<Vec3f> &axesVector, std::vector<cl_mem> &axesBuffers, int id);
   void initThreadCL(int id, cl_program clProgram);
   void destroyCL();
 
@@ -189,6 +190,9 @@ class Coptim {
   std::vector<cl_kernel> m_clKernelsT;
   std::vector<cl_event> m_clEventsT;
   std::vector<cl_mem> m_clIndexesT;
+  std::vector<cl_mem> m_clXAxesT;
+  std::vector<cl_mem> m_clYAxesT;
+  std::vector<cl_mem> m_clZAxesT;
   std::vector<cl_mem> m_clPatchVecsT;
 
   // stores current parameters for derivative computation

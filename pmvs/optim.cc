@@ -29,6 +29,9 @@ void Coptim::init(void) {
   m_clKernelsT.resize(m_fm.m_CPU);
   m_clEventsT.resize(m_fm.m_CPU);
   m_clIndexesT.resize(m_fm.m_CPU);
+  m_clXAxesT.resize(m_fm.m_CPU);
+  m_clYAxesT.resize(m_fm.m_CPU);
+  m_clZAxesT.resize(m_fm.m_CPU);
   m_clPatchVecsT.resize(m_fm.m_CPU);
   
   m_texsT.resize(m_fm.m_CPU);
@@ -44,15 +47,30 @@ void Coptim::init(void) {
   setAxesScales();
 }
 
+void Coptim::axesToBuffer(std::vector<Vec3f> &axesVector, std::vector<cl_mem> &axesBuffers, int id) {
+    // 3 component vectors are 4 component aligned
+    // see section 6.1.5 of OpenCL 1.2 spec
+    float axesBuffer[4*m_fm.m_num];
+    for(int i=0; i<m_fm.m_num; i++) {
+        for(int j=0; j<3; j++) {
+            axesBuffer[4*i+j] = axesVector[i][j];
+        }
+    }
+
+    cl_int clErr;
+    axesBuffers[id] = clCreateBuffer(m_fm.m_pss.m_clCtx, CL_MEM_READ_ONLY, 4*m_fm.m_num*sizeof(float), NULL, &clErr);
+    if(clErr < 0) {
+        printf("error creating axesBuffer %d\n", clErr);
+    }
+    clEnqueueWriteBuffer(m_clQueuesT[id], axesBuffers[id], CL_TRUE, 0, 4*m_fm.m_num*sizeof(float), axesBuffer, 0, NULL, NULL);
+}
+
 void Coptim::initThreadCL(int id, cl_program clProgram) {
   cl_int clErr;
 
   m_clQueuesT[id] = clCreateCommandQueue(m_fm.m_pss.m_clCtx, m_fm.m_pss.m_clDevice, 0, &clErr);
   if(clErr < 0) {
       printf("couldn't create command queue %d\n", clErr);
-  }
-  else {
-      printf("opencl queue created successfully\n");
   }
 
   m_clKernelsT[id] = clCreateKernel(clProgram, "refinePatch", &clErr);
@@ -83,9 +101,26 @@ void Coptim::initThreadCL(int id, cl_program clProgram) {
   if(clErr < 0) {
       printf("error setKernelArg 6 %d\n", clErr);
   }
-  clSetKernelArg(m_clKernelsT[id], 7, sizeof(cl_mem), &m_clPatchVecsT[id]);
+
+  axesToBuffer(m_xaxes, m_clXAxesT, id);
+  axesToBuffer(m_yaxes, m_clYAxesT, id);
+  axesToBuffer(m_zaxes, m_clZAxesT, id);
+
+  clSetKernelArg(m_clKernelsT[id], 7, sizeof(cl_mem), &m_clXAxesT[id]);
   if(clErr < 0) {
       printf("error setKernelArg 7 %d\n", clErr);
+  }
+  clSetKernelArg(m_clKernelsT[id], 8, sizeof(cl_mem), &m_clYAxesT[id]);
+  if(clErr < 0) {
+      printf("error setKernelArg 8 %d\n", clErr);
+  }
+  clSetKernelArg(m_clKernelsT[id], 9, sizeof(cl_mem), &m_clZAxesT[id]);
+  if(clErr < 0) {
+      printf("error setKernelArg 9 %d\n", clErr);
+  }
+  clSetKernelArg(m_clKernelsT[id], 10, sizeof(cl_mem), &m_clPatchVecsT[id]);
+  if(clErr < 0) {
+      printf("error setKernelArg 10 %d\n", clErr);
   }
 
   m_clEventsT[id] = clCreateUserEvent(m_fm.m_pss.m_clCtx, &clErr);
@@ -1185,7 +1220,14 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   for(int i=0; i<3; i++) pf[i] = p[i];
 
   cl_kernel refineKernel = m_clKernelsT[id];
-  cl_event refineEvent = m_clEventsT[id];
+
+  clEnqueueWriteBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_FALSE, 0, 3*sizeof(float), pf, 0, NULL, NULL);
+  clEnqueueWriteBuffer(m_clQueuesT[id], m_clIndexesT[id], CL_FALSE, 0, m_indexesT[id].size() * sizeof(int), m_indexesT[id].data(),
+          0, NULL, NULL);
+  if(m_indexesT[id].size() == 0) printf("empty indexes\n");
+  for(int i=0; i<m_indexesT[id].size(); i++) {
+      if(m_indexesT[id][i] > 7) printf("invalid index %d\n", m_indexesT[id][i]);
+  }
 
   clSetKernelArg(refineKernel, 2, 4*sizeof(float), centerVec);
   clSetKernelArg(refineKernel, 3, 4*sizeof(float), rayVec);
@@ -1196,10 +1238,10 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   // return status messages similar to GSL
   //
   
-  clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, &refineEvent);
-  printf("enqueue task %d\n", clErr);
-  clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], true, 0, 3*sizeof(float), pf, 1, &refineEvent, NULL);
-  printf("buffer val %d %f\n", clErr, pf[0]);
+  clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
+  clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_TRUE, 0, 3*sizeof(float), pf, 0, NULL, NULL);
+  printf("buffer val %d %f %f %f\n", id, pf[0], pf[1], pf[2]);
+  printf("patch cent %d %f %f %f\n", id, patch.m_normal[0], patch.m_normal[1], patch.m_normal[2]);
   
   //status = GSL_SUCCESS;
 
