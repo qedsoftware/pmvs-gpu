@@ -2,6 +2,8 @@
 #include <numeric>
 //#include <levmar/lm.h>
 #include <gsl/gsl_deriv.h>
+#include <sstream>
+#include <fstream>
 #include "findMatch.h"
 #include "optim.h"
 
@@ -27,11 +29,7 @@ void Coptim::init(void) {
   m_paramsT.resize(m_fm.m_CPU);
   m_clQueuesT.resize(m_fm.m_CPU);
   m_clKernelsT.resize(m_fm.m_CPU);
-  m_clEventsT.resize(m_fm.m_CPU);
   m_clIndexesT.resize(m_fm.m_CPU);
-  m_clXAxesT.resize(m_fm.m_CPU);
-  m_clYAxesT.resize(m_fm.m_CPU);
-  m_clZAxesT.resize(m_fm.m_CPU);
   m_clPatchVecsT.resize(m_fm.m_CPU);
   
   m_texsT.resize(m_fm.m_CPU);
@@ -45,9 +43,10 @@ void Coptim::init(void) {
   }
   
   setAxesScales();
+  initCL();
 }
 
-void Coptim::axesToBuffer(std::vector<Vec3f> &axesVector, std::vector<cl_mem> &axesBuffers, int id) {
+void Coptim::axesToBuffer(cl_command_queue clQueue, std::vector<Vec3f> &axesVector, cl_mem &axesCLBuffer) {
     // 3 component vectors are 4 component aligned
     // see section 6.1.5 of OpenCL 1.2 spec
     float axesBuffer[4*m_fm.m_num];
@@ -58,88 +57,225 @@ void Coptim::axesToBuffer(std::vector<Vec3f> &axesVector, std::vector<cl_mem> &a
     }
 
     cl_int clErr;
-    axesBuffers[id] = clCreateBuffer(m_fm.m_pss.m_clCtx, CL_MEM_READ_ONLY, 4*m_fm.m_num*sizeof(float), NULL, &clErr);
+    axesCLBuffer = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, 4*m_fm.m_num*sizeof(float), NULL, &clErr);
     if(clErr < 0) {
         printf("error creating axesBuffer %d\n", clErr);
     }
-    clEnqueueWriteBuffer(m_clQueuesT[id], axesBuffers[id], CL_TRUE, 0, 4*m_fm.m_num*sizeof(float), axesBuffer, 0, NULL, NULL);
+    clEnqueueWriteBuffer(clQueue, axesCLBuffer, CL_TRUE, 0, 4*m_fm.m_num*sizeof(float), axesBuffer, 0, NULL, NULL);
 }
 
-void Coptim::initThreadCL(int id, cl_program clProgram) {
+void Coptim::rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out) {
+    unsigned char *cin = in;
+    unsigned char *cout = out;
+    for(int i=0; i<height; i++) {
+        for(int j=0; j<width; j++) {
+            for(int k=0; k<3; k++) {
+                *cout = *cin;
+                cin++;
+                cout++;
+            }
+            *cout = 255;
+            cout++;
+        }
+    }
+}
+
+void Coptim::initCL() {
+    cl_uint numPlatforms, numDevices;
+    cl_int cl_err;
+    cl_platform_id platforms[1];
+    cl_device_id devices[1];
+    clGetPlatformIDs(1, platforms, &numPlatforms);
+    const cl_context_properties cl_props[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platforms[0], 0};
+    clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_GPU, 1, devices, &numDevices);
+    m_clCtx = clCreateContext(cl_props, 1, devices, NULL, NULL, &cl_err);
+    if(cl_err == CL_SUCCESS) {
+        printf("OpenCL context created successfully\n");
+    }
+    else {
+        printf("OpenCL error creating context %d\n", cl_err);
+    }
+    m_clDevice = devices[0];
+
+    std::ifstream t("/home/jkevin/src/OpenDroneMap/src/cmvs/program/base/pmvs/refinePatch.cl");
+    std::stringstream buffer;
+    buffer << t.rdbuf();
+    std::string pstr = buffer.str();
+    const char *pcstr = pstr.c_str();
+    size_t pstrlen = pstr.length();
+    cl_int clErr;
+    m_clProgram = clCreateProgramWithSource(m_clCtx, 1, &pcstr, &pstrlen, &clErr);
+    printf("%s\n", pcstr);
+    printf("created cl program %d\n", clErr);
+
+    clBuildProgram(m_clProgram, 1, &m_clDevice, NULL, NULL, NULL);
+    cl_build_status buildStatus;
+    clGetProgramBuildInfo(m_clProgram, m_clDevice,
+            CL_PROGRAM_BUILD_STATUS, sizeof(cl_build_status), 
+            &buildStatus, NULL);
+    if(buildStatus != CL_BUILD_SUCCESS) {
+        printf("error building program %d\n", buildStatus);
+        char *buildLog = (char *)malloc(50*1024);
+        clErr = clGetProgramBuildInfo(m_clProgram, m_clDevice,
+                CL_PROGRAM_BUILD_LOG, 50*1024, buildLog, NULL);
+        printf("got build info %d\n", clErr);
+        printf("%s\n", buildLog);
+        free(buildLog);
+        std::exit(0);
+    }
+    else {
+        printf("successfully built program\n");
+    }
+
+    cl_command_queue clQueue = clCreateCommandQueue(m_clCtx, m_clDevice, 0, &clErr);
+
+    initCLImageArray(clQueue);
+    initCLImageObjects(clQueue);
+
+    clReleaseCommandQueue(clQueue);
+
+    for(int i=0; i<m_fm.m_CPU; i++) {
+        initCLThreadObjects(i);
+    }
+}
+
+void Coptim::initCLImageArray(cl_command_queue clQueue) {
+    cl_int clErr;
+    int maxWidth = 0;
+    int maxHeight = 0;
+    for(int i=0; i<m_fm.m_num; i++) {
+        int cwidth = m_fm.m_pss.m_photos[i].getWidth();
+        int cheight = m_fm.m_pss.m_photos[i].getHeight();
+        maxWidth = std::max(maxWidth, cwidth);
+        maxHeight = std::max(maxHeight, cheight);
+    }
+    cl_image_format imFormat = {CL_RGBA, CL_UNORM_INT8};
+    unsigned char *rgbaBuffer = (unsigned char *)malloc(maxWidth*maxHeight*4);
+    cl_image_desc imDesc = {
+        CL_MEM_OBJECT_IMAGE2D_ARRAY,
+        maxWidth, maxHeight, 1, m_fm.m_num,
+        0, 0, 0, 0, NULL};
+
+    m_clImageArray = clCreateImage(m_clCtx,
+            CL_MEM_READ_ONLY,
+            &imFormat,
+            &imDesc, 
+            NULL,
+            &clErr);
+    printf("created CL image array %x\n", clErr);
+
+    for(int i=0; i<m_fm.m_num; i++) {
+        int imWidth = m_fm.m_pss.m_photos[i].getWidth();
+        int imHeight = m_fm.m_pss.m_photos[i].getHeight();
+        // must convert to RGBA because nvidia doesn't support RGB
+        rgbToRGBA(imWidth, imHeight, m_fm.m_pss.m_photos[i].imData(), rgbaBuffer);
+        size_t origin[] = {0,0,i};
+        size_t region[] = {imWidth, imHeight, 1};
+        clEnqueueReadImage(clQueue, m_clImageArray, CL_FALSE,
+                origin, region, 0, 0,
+                rgbaBuffer, NULL, 0, NULL);
+    }
+    clFinish(clQueue);
+    free(rgbaBuffer);
+}
+
+void Coptim::initCLImageObjects(cl_command_queue clQueue) {
+    cl_int clErr;
+
+    size_t projDataSize = m_fm.m_num * 3 * 4 * sizeof(float);
+    float *imProjectionData = (float *)malloc(projDataSize);
+    float *cptr = imProjectionData;
+    for(int i=0; i<m_fm.m_num; i++) {
+        for(int j=0; j<3; j++) {
+            for(int k=0; k<4; k++) {
+                *cptr = m_fm.m_pss.m_photos[i].m_projection[0][j][k];
+                cptr++;
+            }
+        }
+    }
+    m_clIProjections = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, 
+            projDataSize, imProjectionData, &clErr);
+    free(imProjectionData);
+
+    axesToBuffer(clQueue, m_xaxes, m_clIXAxes);
+    axesToBuffer(clQueue, m_yaxes, m_clIYAxes);
+    axesToBuffer(clQueue, m_zaxes, m_clIZAxes);
+
+    float centerBuffer[4*m_fm.m_num];
+    for(int i=0; i<m_fm.m_num; i++) {
+        for(int j=0; j<4; j++) {
+            centerBuffer[i*4+j] = m_fm.m_pss.m_photos[i].m_center[j];
+        }
+    }
+    m_clICenters = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, 4*m_fm.m_num*sizeof(float), NULL, &clErr);
+    if(clErr < 0) {
+        printf("error creating ImCenters buffer %d\n", clErr);
+    }
+    m_clIPScales = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, m_fm.m_num*sizeof(float), NULL, &clErr);
+    if(clErr < 0) {
+        printf("error creating IPScales buffer %d\n", clErr);
+    }
+    clEnqueueWriteBuffer(clQueue, m_clICenters, CL_TRUE, 0, 4*m_fm.m_num*sizeof(float), centerBuffer, 0, NULL, NULL);
+    clEnqueueWriteBuffer(clQueue, m_clIPScales, CL_TRUE, 0, m_fm.m_num*sizeof(float), m_ipscales.data(), 0, NULL, NULL);
+}
+
+void Coptim::initCLThreadObjects(int id) {
   cl_int clErr;
 
-  m_clQueuesT[id] = clCreateCommandQueue(m_fm.m_pss.m_clCtx, m_fm.m_pss.m_clDevice, 0, &clErr);
+  m_clQueuesT[id] = clCreateCommandQueue(m_clCtx, m_clDevice, 0, &clErr);
   if(clErr < 0) {
       printf("couldn't create command queue %d\n", clErr);
   }
 
-  m_clKernelsT[id] = clCreateKernel(clProgram, "refinePatch", &clErr);
+  m_clKernelsT[id] = clCreateKernel(m_clProgram, "refinePatch", &clErr);
   if(clErr < 0) {
       printf("error creating opencl kernel %d\n", clErr);
   }
 
   // set kernel args that don't change
-  clErr = clSetKernelArg(m_clKernelsT[id], 0, sizeof(cl_mem), &m_fm.m_pss.m_clImageArray);
+  clErr = clSetKernelArg(m_clKernelsT[id], 0, sizeof(cl_mem), &m_clImageArray);
   if(clErr < 0) {
       printf("error setKernelArg 0 %d\n", clErr);
   }
-  clErr = clSetKernelArg(m_clKernelsT[id], 1, sizeof(cl_mem), &m_fm.m_pss.m_clImageProjections);
+  clErr = clSetKernelArg(m_clKernelsT[id], 1, sizeof(cl_mem), &m_clIProjections);
   if(clErr < 0) {
       printf("error setKernelArg 1 %d\n", clErr);
   }
 
-  m_clIndexesT[id] = clCreateBuffer(m_fm.m_pss.m_clCtx, CL_MEM_READ_ONLY, m_fm.m_pss.m_num * sizeof(int), NULL, &clErr);
+  m_clIndexesT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, m_fm.m_pss.m_num * sizeof(int), NULL, &clErr);
   if(clErr < 0) {
       printf("error createBuffer indexes %d\n", clErr);
   }
-  m_clPatchVecsT[id] = clCreateBuffer(m_fm.m_pss.m_clCtx, CL_MEM_READ_WRITE, 3 * sizeof(float), NULL, &clErr);
+  m_clPatchVecsT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, 3 * sizeof(float), NULL, &clErr);
   if(clErr < 0) {
       printf("error createBuffer patchVecs %d\n", clErr);
   }
 
-  clSetKernelArg(m_clKernelsT[id], 6, sizeof(cl_mem), &m_clIndexesT[id]);
+  clSetKernelArg(m_clKernelsT[id], 6, sizeof(cl_mem), &m_clIPScales);
+  clSetKernelArg(m_clKernelsT[id], 7, sizeof(cl_mem), &m_clIndexesT[id]);
   if(clErr < 0) {
       printf("error setKernelArg 6 %d\n", clErr);
   }
-
-  axesToBuffer(m_xaxes, m_clXAxesT, id);
-  axesToBuffer(m_yaxes, m_clYAxesT, id);
-  axesToBuffer(m_zaxes, m_clZAxesT, id);
-
-  clSetKernelArg(m_clKernelsT[id], 7, sizeof(cl_mem), &m_clXAxesT[id]);
-  if(clErr < 0) {
-      printf("error setKernelArg 7 %d\n", clErr);
-  }
-  clSetKernelArg(m_clKernelsT[id], 8, sizeof(cl_mem), &m_clYAxesT[id]);
+  clSetKernelArg(m_clKernelsT[id], 8, sizeof(cl_mem), &m_clIXAxes);
   if(clErr < 0) {
       printf("error setKernelArg 8 %d\n", clErr);
   }
-  clSetKernelArg(m_clKernelsT[id], 9, sizeof(cl_mem), &m_clZAxesT[id]);
+  clSetKernelArg(m_clKernelsT[id], 9, sizeof(cl_mem), &m_clIYAxes);
   if(clErr < 0) {
       printf("error setKernelArg 9 %d\n", clErr);
   }
-  clSetKernelArg(m_clKernelsT[id], 10, sizeof(cl_mem), &m_clPatchVecsT[id]);
+  clSetKernelArg(m_clKernelsT[id], 10, sizeof(cl_mem), &m_clIZAxes);
   if(clErr < 0) {
       printf("error setKernelArg 10 %d\n", clErr);
   }
-
-  m_clEventsT[id] = clCreateUserEvent(m_fm.m_pss.m_clCtx, &clErr);
+  clSetKernelArg(m_clKernelsT[id], 11, sizeof(cl_mem), &m_clICenters);
   if(clErr < 0) {
-      printf("error createUserEvent %d\n", clErr);
+      printf("error setKernelArg 11 %d\n", clErr);
   }
-
-  cl_kernel refineKernel = m_clKernelsT[id];
-
-  /*
-  float testVec[4];
-  float t=0;
-  clSetKernelArg(refineKernel, 2, 4*sizeof(float), testVec);
-  clSetKernelArg(refineKernel, 3, 4*sizeof(float), testVec);
-  clSetKernelArg(refineKernel, 4, sizeof(float), &t);
-  clSetKernelArg(refineKernel, 5, sizeof(float), &t);
-  clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, &m_clEventsT[id]);
-  printf("enqueue task %d\n", clErr);
-  */
+  clSetKernelArg(m_clKernelsT[id], 12, sizeof(cl_mem), &m_clPatchVecsT[id]);
+  if(clErr < 0) {
+      printf("error setKernelArg 12 %d\n", clErr);
+  }
 }
 
 void Coptim::destroyCL() {

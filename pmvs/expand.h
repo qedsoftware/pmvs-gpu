@@ -17,7 +17,6 @@ class Cexpand {
 
   void init(void);
   void run(void);
-  void initCLProgram(void);
 
   float computeRadius(const Patch::Cpatch& patch);
   
@@ -55,9 +54,6 @@ class Cexpand {
   std::vector<int> m_fcounts1;
   // Number passes
   std::vector<int> m_pcounts;
-
-  // OpenCL
-  cl_program m_clProgram;
 
 };
 };

@@ -6,8 +6,6 @@ using namespace std;
 using namespace Image;
 
 CphotoSetS::CphotoSetS(void) {
-    m_clImageArray = NULL;
-    m_clImageProjections = NULL;
 }
 
 CphotoSetS::~CphotoSetS() {
@@ -15,15 +13,12 @@ CphotoSetS::~CphotoSetS() {
 
 void CphotoSetS::init(const std::vector<int>& images, const std::string prefix,
                       const int maxLevel, const int size, const int alloc) {
-  initCL();
   m_images = images;
   m_num = (int)images.size();
   
   for (int i = 0; i < (int)images.size(); ++i)
     m_dict[images[i]] = i;
 
-  int maxWidth = 0;
-  int maxHeight = 0;
   m_prefix = prefix;
   m_maxLevel = max(1, maxLevel);
   m_photos.resize(m_num);
@@ -70,13 +65,6 @@ void CphotoSetS::init(const std::vector<int>& images, const std::string prefix,
       cerr << '*' << flush;
     }
 
-    if(m_photos[index].getWidth() > maxWidth) {
-        maxWidth = m_photos[index].getWidth();
-    }
-    if(m_photos[index].getHeight() > maxHeight) {
-        maxHeight = m_photos[index].getHeight();
-    }
-
     /*
     const int image = m_images[index];
     char name[1024], mname[1024], ename[1024], cname[1024];
@@ -98,89 +86,11 @@ void CphotoSetS::init(const std::vector<int>& images, const std::string prefix,
   cerr << endl;
   const int margin = size / 2;
   m_size = 2 * margin + 1;
-
-  printf("maxWidth %d maxHeight %d\n", maxWidth, maxHeight);
-
-  if(alloc) {
-      cl_int clErr;
-      cl_image_format imFormat = {CL_RGBA, CL_UNORM_INT8};
-      unsigned char *rgbaBuffer = (unsigned char *)malloc(maxWidth*maxHeight*4);
-      cl_image_desc imDesc = {
-          CL_MEM_OBJECT_IMAGE2D_ARRAY,
-          maxWidth, maxHeight, 1, m_num,
-          0, 0, 0, 0, NULL};
-
-      m_clImageArray = clCreateImage(m_clCtx,
-              CL_MEM_READ_ONLY,
-              &imFormat,
-              &imDesc, 
-              NULL,
-              &clErr);
-      printf("created CL image array %x\n", clErr);
-
-      cl_command_queue clQueue = clCreateCommandQueue(m_clCtx, m_clDevice, 0, &clErr);
-
-      for(int i=0; i<m_num; i++) {
-          int imWidth = m_photos[i].getWidth();
-          int imHeight = m_photos[i].getHeight();
-          // must convert to RGBA because nvidia doesn't support RGB
-          rgbToRGBA(imWidth, imHeight, m_photos[i].imData(), rgbaBuffer);
-          size_t origin[] = {0,0,i};
-          size_t region[] = {imWidth, imHeight, 1};
-          clEnqueueReadImage(clQueue, m_clImageArray, CL_FALSE,
-                  origin, region, 0, 0,
-                  rgbaBuffer, NULL, 0, NULL);
-      }
-
-      size_t projDataSize = m_num * 3 * 4 * sizeof(float);
-      float *imProjectionData = (float *)malloc(projDataSize);
-      float *cptr = imProjectionData;
-      for(int i=0; i<m_num; i++) {
-          for(int j=0; j<3; j++) {
-              for(int k=0; k<4; k++) {
-                  *cptr = m_photos[i].m_projection[0][j][k];
-                  cptr++;
-              }
-          }
-      }
-      m_clImageProjections = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, 
-              projDataSize, imProjectionData, &clErr);
-      free(imProjectionData);
-
-      clFinish(clQueue);
-      free(rgbaBuffer);
-      clReleaseCommandQueue(clQueue);
-  }
-  
-}
-
-void CphotoSetS::initCL() {
-    cl_uint numPlatforms, numDevices;
-    cl_int cl_err;
-    cl_platform_id platforms[1];
-    cl_device_id devices[1];
-    clGetPlatformIDs(1, platforms, &numPlatforms);
-    const cl_context_properties cl_props[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platforms[0], 0};
-    clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_GPU, 1, devices, &numDevices);
-    m_clCtx = clCreateContext(cl_props, 1, devices, NULL, NULL, &cl_err);
-    if(cl_err == CL_SUCCESS) {
-        printf("OpenCL context created successfully\n");
-    }
-    else {
-        printf("OpenCL error creating context %d\n", cl_err);
-    }
-    m_clDevice = devices[0];
 }
 
 void CphotoSetS::freePhotoSet(void) {
   for (int index = 0; index < (int)m_photos.size(); ++index)
     m_photos[index].free();
-  if(m_clImageArray != NULL) {
-      clReleaseMemObject(m_clImageArray);
-  }
-  if(m_clImageProjections != NULL) {
-      clReleaseMemObject(m_clImageProjections);
-  }
 }
 
 void CphotoSetS::freePhotoSet(const int level) {
@@ -350,20 +260,4 @@ int CphotoSetS::image2index(const int image) const {
     return -1;
   else
     return pos->second;
-}
-
-void CphotoSetS::rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out) {
-    unsigned char *cin = in;
-    unsigned char *cout = out;
-    for(int i=0; i<height; i++) {
-        for(int j=0; j<width; j++) {
-            for(int k=0; k<3; k++) {
-                *cout = *cin;
-                cin++;
-                cout++;
-            }
-            *cout = 255;
-            cout++;
-        }
-    }
 }

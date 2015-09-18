@@ -2,8 +2,6 @@
 #include <numeric>
 #include <iterator>
 #include <string>
-#include <sstream>
-#include <fstream>
 #include "expand.h"
 #include "findMatch.h"
 
@@ -18,7 +16,6 @@ void Cexpand::init(void) {
 }
 
 void Cexpand::run(void) {
-  initCLProgram();
   m_fm.m_count = 0;
   m_fm.m_jobs.clear();
   m_ecounts.resize(m_fm.m_CPU);
@@ -67,42 +64,6 @@ void Cexpand::run(void) {
        << 100 * fail1 / (float)trial << ' '
        << 100 * (pass + fail1) / (float)trial << endl;
   
-}
-
-void Cexpand::initCLProgram(void) {
-    std::ifstream t("/home/jkevin/src/OpenDroneMap/src/cmvs/program/base/pmvs/refinePatch.cl");
-    std::stringstream buffer;
-    buffer << t.rdbuf();
-    std::string pstr = buffer.str();
-    const char *pcstr = pstr.c_str();
-    size_t pstrlen = pstr.length();
-    cl_int clErr;
-    m_clProgram = clCreateProgramWithSource(m_fm.m_pss.m_clCtx, 1, &pcstr, &pstrlen, &clErr);
-    printf("%s\n", pcstr);
-    printf("created cl program %d\n", clErr);
-
-    clBuildProgram(m_clProgram, 1, &m_fm.m_pss.m_clDevice, NULL, NULL, NULL);
-    cl_build_status buildStatus;
-    clGetProgramBuildInfo(m_clProgram, m_fm.m_pss.m_clDevice,
-            CL_PROGRAM_BUILD_STATUS, sizeof(cl_build_status), 
-            &buildStatus, NULL);
-    if(buildStatus != CL_BUILD_SUCCESS) {
-        printf("error building program %d\n", buildStatus);
-        char *buildLog = (char *)malloc(50*1024);
-        clErr = clGetProgramBuildInfo(m_clProgram, m_fm.m_pss.m_clDevice,
-                CL_PROGRAM_BUILD_LOG, 50*1024, buildLog, NULL);
-        printf("got build info %d\n", clErr);
-        printf("%s\n", buildLog);
-        free(buildLog);
-        std::exit(0);
-    }
-    else {
-        printf("successfully built program\n");
-    }
-
-    for(int id=0; id<m_fm.m_CPU; id++) {
-        m_fm.m_optim.initThreadCL(id, m_clProgram);
-    }
 }
 
 void* Cexpand::expandThreadTmp(void* arg) {

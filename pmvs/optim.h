@@ -14,8 +14,12 @@ class Coptim {
   Coptim(CfindMatch& findMatch);
 
   void init(void);
-  void axesToBuffer(std::vector<Vec3f> &axesVector, std::vector<cl_mem> &axesBuffers, int id);
-  void initThreadCL(int id, cl_program clProgram);
+  void axesToBuffer(cl_command_queue clQueue, std::vector<Vec3f> &axesVector, cl_mem &axesBuffers);
+  static void rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out);
+  void initCL();
+  void initCLImageArray(cl_command_queue clQueue);
+  void initCLImageObjects(cl_command_queue clQueue);
+  void initCLThreadObjects(int id);
   void destroyCL();
 
   //-----------------------------------------------------------------
@@ -186,13 +190,28 @@ class Coptim {
   std::vector<std::vector<int> > m_indexesT;
   std::vector<float> m_dscalesT;
   std::vector<float> m_ascalesT;
+
+  //-----------------------------------------------------------------
+  // OpenCL
+  cl_context m_clCtx;
+  cl_device_id m_clDevice;
+  cl_program m_clProgram;
+
+  // CL image array
+  cl_mem m_clImageArray;
+
+  // CL per image objects
+  cl_mem m_clIProjections;
+  cl_mem m_clIXAxes;
+  cl_mem m_clIYAxes;
+  cl_mem m_clIZAxes;
+  cl_mem m_clICenters;
+  cl_mem m_clIPScales;
+
+  // CL per thread objects
   std::vector<cl_command_queue> m_clQueuesT;
   std::vector<cl_kernel> m_clKernelsT;
-  std::vector<cl_event> m_clEventsT;
   std::vector<cl_mem> m_clIndexesT;
-  std::vector<cl_mem> m_clXAxesT;
-  std::vector<cl_mem> m_clYAxesT;
-  std::vector<cl_mem> m_clZAxesT;
   std::vector<cl_mem> m_clPatchVecsT;
 
   // stores current parameters for derivative computation

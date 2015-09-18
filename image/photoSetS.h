@@ -92,19 +92,6 @@ class CphotoSetS {
   // pairwise distance based on optical center and viewing direction
   void setDistances(void);
   std::vector<std::vector<float> > m_distances;
-
-  static void rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out);
-
-  // OpenCL
-  void initCL();
-  cl_context m_clCtx;
-  cl_device_id m_clDevice;
-
-  // CL image data
-  cl_mem m_clImageArray;
-  cl_mem m_clImageProjections;
-
- protected:  
 }; 
  
 Vec3f CphotoSetS::project(const int index, const Vec4f& coord,
