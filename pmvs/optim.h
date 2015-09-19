@@ -2,6 +2,7 @@
 #define PMVS3_OPTIM_H
 
 #include <vector>
+#include <sstream>
 #include "patch.h"
 #include <gsl/gsl_multimin.h>
 
@@ -171,10 +172,11 @@ class Coptim {
  protected:
   
   void setAxesScales(void);
-  
+  template <typename T1, typename T2>
+  static void strSubstitute(std::string &str, T1 searchStrIn, T2 replaceIn, bool replaceAll = false);
   static Coptim* m_one;  
   CfindMatch& m_fm;
-  
+
   //-----------------------------------------------------------------
   // Axes
   std::vector<Vec3f> m_xaxes;
@@ -226,6 +228,26 @@ class Coptim {
   
 };
 
+template <typename T1, typename T2>
+void Coptim::strSubstitute(std::string &str, T1 searchStrIn, T2 replaceIn, bool replaceAll) {
+    size_t startPos;
+    std::string searchStr(searchStrIn);
+    std::stringstream ss;
+
+    ss << replaceIn;
+
+    startPos = str.find(searchStr);
+    while(startPos != std::string::npos) {
+        str.replace(startPos, searchStr.length(), ss.str());
+        if(replaceAll) {
+            startPos = str.find(searchStr);
+        }
+        else {
+            startPos = std::string::npos;
+        }
+    }
+}
+  
 };
 
 #endif // PMVS3_OPTIM_H

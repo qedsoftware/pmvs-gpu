@@ -2,7 +2,6 @@
 #include <numeric>
 //#include <levmar/lm.h>
 #include <gsl/gsl_deriv.h>
-#include <sstream>
 #include <fstream>
 #include "findMatch.h"
 #include "optim.h"
@@ -101,6 +100,7 @@ void Coptim::initCL() {
     std::stringstream buffer;
     buffer << t.rdbuf();
     std::string pstr = buffer.str();
+    strSubstitute(pstr, "<WSIZE>", m_fm.m_wsize);
     const char *pcstr = pstr.c_str();
     size_t pstrlen = pstr.length();
     cl_int clErr;
@@ -144,8 +144,8 @@ void Coptim::initCLImageArray(cl_command_queue clQueue) {
     int maxWidth = 0;
     int maxHeight = 0;
     for(int i=0; i<m_fm.m_num; i++) {
-        int cwidth = m_fm.m_pss.m_photos[i].getWidth();
-        int cheight = m_fm.m_pss.m_photos[i].getHeight();
+        int cwidth = m_fm.m_pss.m_photos[i].getWidth(m_fm.m_level);
+        int cheight = m_fm.m_pss.m_photos[i].getHeight(m_fm.m_level);
         maxWidth = std::max(maxWidth, cwidth);
         maxHeight = std::max(maxHeight, cheight);
     }
@@ -165,10 +165,10 @@ void Coptim::initCLImageArray(cl_command_queue clQueue) {
     printf("created CL image array %x\n", clErr);
 
     for(int i=0; i<m_fm.m_num; i++) {
-        int imWidth = m_fm.m_pss.m_photos[i].getWidth();
-        int imHeight = m_fm.m_pss.m_photos[i].getHeight();
+        int imWidth = m_fm.m_pss.m_photos[i].getWidth(m_fm.m_level);
+        int imHeight = m_fm.m_pss.m_photos[i].getHeight(m_fm.m_level);
         // must convert to RGBA because nvidia doesn't support RGB
-        rgbToRGBA(imWidth, imHeight, m_fm.m_pss.m_photos[i].imData(), rgbaBuffer);
+        rgbToRGBA(imWidth, imHeight, m_fm.m_pss.m_photos[i].imData(m_fm.m_level), rgbaBuffer);
         size_t origin[] = {0,0,i};
         size_t region[] = {imWidth, imHeight, 1};
         clEnqueueWriteImage(clQueue, m_clImageArray, CL_FALSE,
@@ -188,13 +188,13 @@ void Coptim::initCLImageObjects(cl_command_queue clQueue) {
     for(int i=0; i<m_fm.m_num; i++) {
         for(int j=0; j<3; j++) {
             for(int k=0; k<4; k++) {
-                *cptr = m_fm.m_pss.m_photos[i].m_projection[0][j][k];
+                *cptr = m_fm.m_pss.m_photos[i].m_projection[m_fm.m_level][j][k];
                 cptr++;
             }
         }
     }
-    m_clIProjections = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, 
-            projDataSize, imProjectionData, &clErr);
+    m_clIProjections = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, projDataSize, NULL, &clErr);
+    clEnqueueWriteBuffer(clQueue, m_clIProjections, CL_TRUE, 0, projDataSize, imProjectionData, 0, NULL, NULL);
     free(imProjectionData);
 
     axesToBuffer(clQueue, m_xaxes, m_clIXAxes);
@@ -251,30 +251,37 @@ void Coptim::initCLThreadObjects(int id) {
       printf("error createBuffer patchVecs %d\n", clErr);
   }
 
-  clSetKernelArg(m_clKernelsT[id], 6, sizeof(cl_mem), &m_clIPScales);
-  clSetKernelArg(m_clKernelsT[id], 7, sizeof(cl_mem), &m_clIndexesT[id]);
+  clErr = clSetKernelArg(m_clKernelsT[id], 6, sizeof(cl_mem), &m_clIPScales);
   if(clErr < 0) {
       printf("error setKernelArg 6 %d\n", clErr);
   }
-  clSetKernelArg(m_clKernelsT[id], 8, sizeof(cl_mem), &m_clIXAxes);
+  clErr = clSetKernelArg(m_clKernelsT[id], 7, sizeof(cl_mem), &m_clIndexesT[id]);
+  if(clErr < 0) {
+      printf("error setKernelArg 7 %d\n", clErr);
+  }
+  clErr = clSetKernelArg(m_clKernelsT[id], 8, sizeof(cl_mem), &m_clIXAxes);
   if(clErr < 0) {
       printf("error setKernelArg 8 %d\n", clErr);
   }
-  clSetKernelArg(m_clKernelsT[id], 9, sizeof(cl_mem), &m_clIYAxes);
+  clErr = clSetKernelArg(m_clKernelsT[id], 9, sizeof(cl_mem), &m_clIYAxes);
   if(clErr < 0) {
       printf("error setKernelArg 9 %d\n", clErr);
   }
-  clSetKernelArg(m_clKernelsT[id], 10, sizeof(cl_mem), &m_clIZAxes);
+  clErr = clSetKernelArg(m_clKernelsT[id], 10, sizeof(cl_mem), &m_clIZAxes);
   if(clErr < 0) {
       printf("error setKernelArg 10 %d\n", clErr);
   }
-  clSetKernelArg(m_clKernelsT[id], 11, sizeof(cl_mem), &m_clICenters);
+  clErr = clSetKernelArg(m_clKernelsT[id], 11, sizeof(cl_mem), &m_clICenters);
   if(clErr < 0) {
       printf("error setKernelArg 11 %d\n", clErr);
   }
-  clSetKernelArg(m_clKernelsT[id], 12, sizeof(cl_mem), &m_clPatchVecsT[id]);
+  clErr = clSetKernelArg(m_clKernelsT[id], 12, sizeof(cl_mem), &m_clPatchVecsT[id]);
   if(clErr < 0) {
       printf("error setKernelArg 12 %d\n", clErr);
+  }
+  clErr = clSetKernelArg(m_clKernelsT[id], 13, sizeof(int), &m_fm.m_level);
+  if(clErr < 0) {
+      printf("error setKernelArg 13 %d\n", clErr);
   }
 }
 
@@ -1341,6 +1348,7 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   for(int i=0; i<4; i++) rayVec[i] = rayTmp[i];
 
   m_indexesT[id] = patch.m_images;
+  const int size = min(m_fm.m_tau, (int)m_indexesT[id].size());
   
   float ascale = M_PI / 48.0f;//patch.m_ascale;
   
@@ -1369,6 +1377,7 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   clSetKernelArg(refineKernel, 3, 4*sizeof(float), rayVec);
   clSetKernelArg(refineKernel, 4, sizeof(float), &patch.m_dscale);
   clSetKernelArg(refineKernel, 5, sizeof(float), &ascale);
+  clSetKernelArg(refineKernel, 14, sizeof(int), &size);
 
   // call GPU min`and store result to p
   // return status messages similar to GSL
@@ -1376,8 +1385,16 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   
   clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
   clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_TRUE, 0, 3*sizeof(float), pf, 0, NULL, NULL);
-  printf("buffer val %d %f %f %f\n", id, pf[0], pf[1], pf[2]);
-  printf("patch cent %d %f %f %f\n", id, patch.m_normal[0], patch.m_normal[1], patch.m_normal[2]);
+
+  const int index = m_one->m_indexesT[id][0];
+  Vec4f pxaxis, pyaxis;
+  m_one->getPAxes(index, patch.m_coord, patch.m_normal, pxaxis, pyaxis);
+  int flag = grabTex(patch.m_coord, pxaxis, pyaxis, patch.m_normal, index,
+                          m_fm.m_wsize, m_texsT[id][0]);
+
+  printf("buffer val %d %f\n", id, pf[0]);
+  //printf("patch cent %d %f %f %f\n", id, pxaxis[0], pxaxis[1], pxaxis[2]);
+  printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
   
   //status = GSL_SUCCESS;
 

@@ -158,7 +158,7 @@ class Cimage {
 			  const float sigma = 1.0f, const int specular = 0);
   */
 
-  unsigned char *imData() {return m_images[0].data();};
+  unsigned char *imData(int level=0) {return m_images[level].data();};
  protected:
   //----------------------------------------------------------------------
   // member functions
