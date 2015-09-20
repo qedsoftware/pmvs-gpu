@@ -53,15 +53,38 @@ float4 getPAxis(__constant float4 *projections, float4 coord, float4 normal, flo
     return paxis / dis;
 }
 
+imNormalize(__local float *texData, float4 cavg) {
+    float std=0.f;
+    float3 cnorm;
+    __local float *ctexData = texData-1;
+    for(int i=0; i<WSIZE*WSIZE; i++) {
+        cnorm.x = *(++ctexData) - cavg.x;
+        cnorm.y = *(++ctexData) - cavg.y;
+        cnorm.z = *(++ctexData) - cavg.z;
+        std += dot(cnorm, cnorm);
+    }
+    std = sqrt(std/(WSIZE*WSIZE*3));
+
+    ctexData = texData-1;
+    for(int i=0; i<WSIZE*WSIZE; i++) {
+        *(++ctexData) -= cavg.x;  *ctexData /= std;
+        *(++ctexData) -= cavg.y;  *ctexData /= std;
+        *(++ctexData) -= cavg.z;  *ctexData /= std;
+    }
+}
+
 int grabTex(__read_only image2d_array_t images,
         int imIndex,
         __constant float4 *projection,
-        float4 ray,
+        float4 imCenter,
         float4 coord,
         float4 pxaxis,
         float4 pyaxis,
         float4 pzaxis,
         __local float *texData) {
+    float4 cavg = 0.f;
+    float4 ray = normalize(imCenter - coord);
+    
     const float weight = max(0.0f, dot(ray, pzaxis));
 
     //if (weight < cos(m_fm.m_angleThreshold1))
@@ -88,14 +111,20 @@ int grabTex(__read_only image2d_array_t images,
         imCoord.x = vftmp.x;
         imCoord.y = vftmp.y;
         float4 color = read_imagef(images, imSampler, imCoord);
+        cavg += color;
         *(++texp) = color.x;
         *(++texp) = color.y;
         *(++texp) = color.z;
         vftmp += dx;
       }
     }
-
+    cavg /= (WSIZE*WSIZE);
+    imNormalize(texData, cavg);
     return 0;
+}
+
+float robustincc(const float rhs) {
+    return rhs / (1 + 3 * rhs);
 }
 
 float evalF(__read_only image2d_array_t images, /* 0 */
@@ -115,6 +144,7 @@ float evalF(__read_only image2d_array_t images, /* 0 */
         int nIndexes) /* 14 */
 {
     __local float refData[3*WSIZE*WSIZE];
+    __local float imData[3*WSIZE*WSIZE];
     float4 coord = decodeCoord(center, ray, dscale, patchVec);
     int refIdx = indexes[0];
     float4 normal = decodeNormal(xaxes[refIdx], yaxes[refIdx], zaxes[refIdx],
@@ -123,11 +153,25 @@ float evalF(__read_only image2d_array_t images, /* 0 */
     float3 normal3 = (float3)(normal.x, normal.y, normal.z);
     float3 yaxis3 = normalize(cross(normal3, xaxes[refIdx]));
     float3 xaxis3 = cross(yaxis3, normal3);
-    __constant float *refProj = projections + 3*refIdx;
+    __constant float4 *refProj = projections + 3*refIdx;
     float4 pxaxis = getPAxis(refProj, coord, normal, xaxis3, pscale);
     float4 pyaxis = getPAxis(refProj, coord, normal, yaxis3, pscale);
-    grabTex(images, refIdx, refProj, ray, coord, pxaxis, pyaxis, normal, refData);
-    return refData[10]*255.;
+    grabTex(images, refIdx, refProj, imCenters[refIdx], coord, pxaxis, pyaxis, normal, refData);
+    float ans = 0.;
+    int denom = 0;
+    for(int i=1; i<nIndexes; i++) {
+        int imIdx = indexes[i];
+        __constant float4 *imProj = projections + 3*imIdx;
+        grabTex(images, imIdx, imProj, imCenters[imIdx], coord, pxaxis, pyaxis, normal, imData);
+        float corr = 0.;
+        for(int j=0; j<WSIZE*WSIZE*3; j++) {
+            corr += refData[j] * imData[j];
+        }
+        ans += robustincc(1.-corr/(WSIZE*WSIZE*3));
+        //ans += corr / (WSIZE*WSIZE*3);
+        denom++;
+    }
+    return ans / denom;
 }
 
 __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */

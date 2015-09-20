@@ -842,6 +842,8 @@ double Coptim::my_f(const gsl_vector *v, void *params) {
         continue;
       ans +=
         robustincc(1.0 - m_one->dot(m_one->m_texsT[id][0], m_one->m_texsT[id][i]));
+      //ans +=
+      //  m_one->dot(m_one->m_texsT[id][0], m_one->m_texsT[id][i]);
       denom++;
     }
     //if (denom < m_one->m_fm.m_minImageNumThreshold - 1)
@@ -1394,7 +1396,16 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
 
   printf("buffer val %d %f\n", id, pf[0]);
   //printf("patch cent %d %f %f %f\n", id, pxaxis[0], pxaxis[1], pxaxis[2]);
-  printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
+  //printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
+  
+  gsl_vector* x = gsl_vector_alloc (3);
+  gsl_vector_set(x, 0, p[0]);
+  gsl_vector_set(x, 1, p[1]);
+  gsl_vector_set(x, 2, p[2]);
+  int id2 = id;
+  double r = my_f(x, &id2);
+
+  printf("my_f val %d %f\n", id, (float)r);
   
   //status = GSL_SUCCESS;
 
