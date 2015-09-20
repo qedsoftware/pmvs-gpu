@@ -246,7 +246,7 @@ void Coptim::initCLThreadObjects(int id) {
   if(clErr < 0) {
       printf("error createBuffer indexes %d\n", clErr);
   }
-  m_clPatchVecsT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, 3 * sizeof(float), NULL, &clErr);
+  m_clPatchVecsT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, 3 * sizeof(double), NULL, &clErr);
   if(clErr < 0) {
       printf("error createBuffer patchVecs %d\n", clErr);
   }
@@ -1353,6 +1353,14 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   const int size = min(m_fm.m_tau, (int)m_indexesT[id].size());
   
   float ascale = M_PI / 48.0f;//patch.m_ascale;
+
+  m_centersT[id] = patch.m_coord;
+  m_raysT[id] = patch.m_coord -
+    m_fm.m_pss.m_photos[patch.m_images[0]].m_center;
+  unitize(m_raysT[id]);
+  
+  m_dscalesT[id] = patch.m_dscale;
+  m_ascalesT[id] = M_PI / 48.0f;//patch.m_ascale;
   
   computeUnits(patch, m_weightsT[id]);
   for (int i = 1; i < (int)m_weightsT[id].size(); ++i)
@@ -1362,12 +1370,9 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   double p[3];
   encode(patch.m_coord, patch.m_normal, p, id);
 
-  float pf[3];
-  for(int i=0; i<3; i++) pf[i] = p[i];
-
   cl_kernel refineKernel = m_clKernelsT[id];
 
-  clEnqueueWriteBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_FALSE, 0, 3*sizeof(float), pf, 0, NULL, NULL);
+  clEnqueueWriteBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_FALSE, 0, 3*sizeof(double), p, 0, NULL, NULL);
   clEnqueueWriteBuffer(m_clQueuesT[id], m_clIndexesT[id], CL_FALSE, 0, m_indexesT[id].size() * sizeof(int), m_indexesT[id].data(),
           0, NULL, NULL);
   if(m_indexesT[id].size() == 0) printf("empty indexes\n");
@@ -1385,19 +1390,15 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   // return status messages similar to GSL
   //
   
-  clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
-  clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_TRUE, 0, 3*sizeof(float), pf, 0, NULL, NULL);
-
-  const int index = m_one->m_indexesT[id][0];
+  Vec4f coord, normal;
+  decode(coord, normal, p, id);
   Vec4f pxaxis, pyaxis;
-  m_one->getPAxes(index, patch.m_coord, patch.m_normal, pxaxis, pyaxis);
-  int flag = grabTex(patch.m_coord, pxaxis, pyaxis, patch.m_normal, index,
+  const int index = m_one->m_indexesT[id][0];
+  m_one->getPAxes(index, coord, normal, pxaxis, pyaxis);
+  const float pscale = getUnit(index, coord);
+  int flag = grabTex(coord, pxaxis, pyaxis, normal, index,
                           m_fm.m_wsize, m_texsT[id][0]);
-
-  printf("buffer val %d %f\n", id, pf[0]);
-  //printf("patch cent %d %f %f %f\n", id, pxaxis[0], pxaxis[1], pxaxis[2]);
-  //printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
-  
+  float fz = norm(coord - m_fm.m_pss.m_photos[index].m_center);
   gsl_vector* x = gsl_vector_alloc (3);
   gsl_vector_set(x, 0, p[0]);
   gsl_vector_set(x, 1, p[1]);
@@ -1405,7 +1406,16 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   int id2 = id;
   double r = my_f(x, &id2);
 
+  //printf("patch cent %d %lf\n", id, pxaxis[0]);
   printf("my_f val %d %f\n", id, (float)r);
+
+  clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
+  clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_TRUE, 0, 3*sizeof(double), p, 0, NULL, NULL);
+
+
+  printf("buffer val %d %lf\n", id, p[0]);
+  //printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
+  
   
   //status = GSL_SUCCESS;
 

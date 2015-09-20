@@ -1,14 +1,15 @@
 #define WSIZE <WSIZE>
 const sampler_t imSampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
 
-float4 decodeCoord(float4 center, float4 ray, float dscale, float3 patchVec) {
-    return center + dscale * patchVec.x * ray;
+float4 decodeCoord(float4 center, float4 ray, float dscale, double3 patchVec) {
+    double4 dray = (double4)(ray.x, ray.y, ray.z, ray.w);
+    return center + convert_float4((double)dscale * patchVec.x * dray);
 }
 
-float4 decodeNormal(float3 xaxis, float3 yaxis, float3 zaxis, float ascale, float3 patchVec) {
+float4 decodeNormal(float3 xaxis, float3 yaxis, float3 zaxis, float ascale, double3 patchVec) {
     float4 rval;
-    float angle1 = patchVec.y * ascale;
-    float angle2 = patchVec.z * ascale;
+    float angle1 = (float)patchVec.y * ascale;
+    float angle2 = (float)patchVec.z * ascale;
 
     float fx = sin(angle1) * cos(angle2);
     float fy = sin(angle2);
@@ -108,8 +109,8 @@ int grabTex(__read_only image2d_array_t images,
       float3 vftmp = left;
       left += dy;
       for (int x = 0; x < WSIZE; ++x) {
-        imCoord.x = vftmp.x;
-        imCoord.y = vftmp.y;
+        imCoord.x = vftmp.x+.5;
+        imCoord.y = vftmp.y+.5;
         float4 color = read_imagef(images, imSampler, imCoord);
         cavg += color;
         *(++texp) = color.x;
@@ -139,7 +140,7 @@ float evalF(__read_only image2d_array_t images, /* 0 */
         __constant float3 *yaxes, /* 9 */
         __constant float3 *zaxes, /* 10 */
         __constant float4 *imCenters, /* 11 */
-        float3 patchVec, /* 12 */ 
+        double3 patchVec, /* 12 */ 
         int level, /* 13 */
         int nIndexes) /* 14 */
 {
@@ -168,7 +169,6 @@ float evalF(__read_only image2d_array_t images, /* 0 */
             corr += refData[j] * imData[j];
         }
         ans += robustincc(1.-corr/(WSIZE*WSIZE*3));
-        //ans += corr / (WSIZE*WSIZE*3);
         denom++;
     }
     return ans / denom;
@@ -186,7 +186,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
         __constant float3 *yaxes, /* 9 */
         __constant float3 *zaxes, /* 10 */
         __constant float4 *imCenters, /* 11 */
-        __global float3 *patchVecPtr, /* 12 */ 
+        __global double3 *patchVecPtr, /* 12 */ 
         int level, /* 13 */
         int nIndexes) /* 14 */
 {
