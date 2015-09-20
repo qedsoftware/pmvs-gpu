@@ -1314,12 +1314,14 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
     //status = gsl_multimin_test_size (size, 1e-2);
     status = gsl_multimin_test_size (size, 1e-3);
   } while (status == GSL_CONTINUE && iter < time);
+  printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
   p[0] = gsl_vector_get(s->x, 0);
   p[1] = gsl_vector_get(s->x, 1);
   p[2] = gsl_vector_get(s->x, 2);
   
   if (status == GSL_SUCCESS) {
     decode(patch.m_coord, patch.m_normal, p, id);
+    printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
     
     patch.m_ncc = 1.0 -
       unrobustincc(computeINCC(patch.m_coord,
@@ -1340,15 +1342,6 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   int status;
   cl_int clErr;
   
-  float centerVec[4];
-  for(int i=0; i<4; i++) centerVec[i] = patch.m_coord[i];
-
-  Vec4f rayTmp = patch.m_coord -
-        m_fm.m_pss.m_photos[patch.m_images[0]].m_center;
-  unitize(rayTmp);
-  float rayVec[4];
-  for(int i=0; i<4; i++) rayVec[i] = rayTmp[i];
-
   m_indexesT[id] = patch.m_images;
   const int size = min(m_fm.m_tau, (int)m_indexesT[id].size());
   
@@ -1358,6 +1351,10 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   m_raysT[id] = patch.m_coord -
     m_fm.m_pss.m_photos[patch.m_images[0]].m_center;
   unitize(m_raysT[id]);
+  float rayVec[4];
+  for(int i=0; i<4; i++) rayVec[i] = m_raysT[id][i];
+  float centerVec[4];
+  for(int i=0; i<4; i++) centerVec[i] = m_centersT[id][i];
   
   m_dscalesT[id] = patch.m_dscale;
   m_ascalesT[id] = M_PI / 48.0f;//patch.m_ascale;
@@ -1407,13 +1404,13 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   double r = my_f(x, &id2);
 
   //printf("patch cent %d %lf\n", id, pxaxis[0]);
-  printf("my_f val %d %f\n", id, (float)r);
+  //printf("my_f val %d %f\n", id, (float)r);
 
   clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
   clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_TRUE, 0, 3*sizeof(double), p, 0, NULL, NULL);
 
 
-  printf("buffer val %d %lf\n", id, p[0]);
+  printf("buffer val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
   //printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
   
   
