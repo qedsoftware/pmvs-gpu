@@ -45,8 +45,8 @@ void CfindMatch::init(const Soption& option) {
   m_nccThreshold = option.m_threshold;
   m_wsize = option.m_wsize;
   m_minImageNumThreshold = option.m_minImageNum;
-  //m_CPU = option.m_CPU;
-  m_CPU = 128;
+  m_CPU = option.m_CPU;
+  //m_CPU = 128;
   m_setEdge = option.m_setEdge;
   m_sequenceThreshold = option.m_sequence;
 

@@ -16,6 +16,9 @@ struct FArgs {
     double3 patchVec;
     int level;
     int nIndexes;
+    __local float *refData;
+    __local float *imData;
+    __local float *localVal;
 };
 
 float4 decodeCoord(float4 center, float4 ray, float dscale, double3 patchVec) {
@@ -102,6 +105,8 @@ int grabTex(__read_only image2d_array_t images,
         __local float *texData) {
     float4 cavg = 0.f;
     float4 ray = normalize(imCenter - coord);
+    size_t localX = get_local_id(0);
+    size_t localY = get_local_id(1);
     
     const float weight = max(0.0f, dot(ray, pzaxis));
 
@@ -122,6 +127,7 @@ int grabTex(__read_only image2d_array_t images,
     float4 imCoord;
     imCoord.z = imIndex;
     imCoord.w = 0.f;
+    /*
     for (int y = 0; y < WSIZE; ++y) {
       float3 vftmp = left;
       left += dy;
@@ -129,15 +135,31 @@ int grabTex(__read_only image2d_array_t images,
         imCoord.x = vftmp.x+.5;
         imCoord.y = vftmp.y+.5;
         float4 color = read_imagef(images, imSampler, imCoord);
-        cavg += color;
         *(++texp) = color.x;
         *(++texp) = color.y;
         *(++texp) = color.z;
         vftmp += dx;
       }
     }
-    cavg /= (WSIZE*WSIZE);
-    imNormalize(texData, cavg);
+    */
+    float3 imCoord3 = left + dx * localX + dy * localY;
+    imCoord.x = imCoord3.x + .5;
+    imCoord.y = imCoord3.y + .5;
+    float4 color = read_imagef(images, imSampler, imCoord);
+    texData[localY*WSIZE*3 + localX*3] = color.x;
+    texData[localY*WSIZE*3 + localX*3 + 1] = color.y;
+    texData[localY*WSIZE*3 + localX*3 + 2] = color.z;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    if(localX == 0 && localY == 0) {
+      texp = texData - 1;
+      for (int i = 0; i < WSIZE*WSIZE; ++i) {
+        cavg.x += *(++texp);
+        cavg.y += *(++texp);
+        cavg.z += *(++texp);
+      }
+      cavg /= (WSIZE*WSIZE);
+      imNormalize(texData, cavg);
+    }
     return 0;
 }
 
@@ -148,8 +170,8 @@ float robustincc(const float rhs) {
 float evalF(double3 patchVec,
         __read_only image2d_array_t images,
         struct FArgs *args) {
-    __local float refData[3*WSIZE*WSIZE];
-    __local float imData[3*WSIZE*WSIZE];
+    size_t localX = get_local_id(0);
+    size_t localY = get_local_id(1);
     float4 coord = decodeCoord(args->center, args->ray, args->dscale, patchVec);
     int refIdx = args->indexes[0];
     float4 normal = decodeNormal(args->xaxes[refIdx], args->yaxes[refIdx], args->zaxes[refIdx],
@@ -161,24 +183,33 @@ float evalF(double3 patchVec,
     __constant float4 *refProj = args->projections + 3*refIdx;
     float4 pxaxis = getPAxis(refProj, coord, normal, xaxis3, pscale);
     float4 pyaxis = getPAxis(refProj, coord, normal, yaxis3, pscale);
-    grabTex(images, refIdx, refProj, args->imCenters[refIdx], coord, pxaxis, pyaxis, normal, refData);
+    grabTex(images, refIdx, refProj, args->imCenters[refIdx], coord, pxaxis, pyaxis, normal, args->refData);
     float ans = 0.;
     int denom = 0;
     for(int i=1; i < args->nIndexes; i++) {
         int imIdx = args->indexes[i];
         __constant float4 *imProj = args->projections + 3*imIdx;
-        grabTex(images, imIdx, imProj, args->imCenters[imIdx], coord, pxaxis, pyaxis, normal, imData);
+        grabTex(images, imIdx, imProj, args->imCenters[imIdx], coord, pxaxis, pyaxis, normal, args->imData);
         float corr = 0.;
-        for(int j=0; j<WSIZE*WSIZE*3; j++) {
-            corr += refData[j] * imData[j];
+        if(localX == 0 && localY == 0) {
+            for(int j=0; j<WSIZE*WSIZE*3; j++) {
+                corr += args->refData[j] * args->imData[j];
+            }
+            ans += robustincc(1.-corr/(WSIZE*WSIZE*3));
+            denom++;
         }
-        ans += robustincc(1.-corr/(WSIZE*WSIZE*3));
-        denom++;
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
-    return ans / denom;
+    if(localX == 0 && localY == 0) {
+        *(args->localVal) = ans / denom;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    return *(args->localVal);
 }
 
 double3 testStep(double3 patchVec, double3 step, __read_only image2d_array_t images, struct FArgs *args, float *val, bool *didStep) {
+    size_t localX = get_local_id(0);
+    size_t localY = get_local_id(1);
     double3 test1 = patchVec+step;
     double3 test2 = patchVec-step;
     float newval = evalF(test1, images, args);
@@ -212,6 +243,10 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
         int level, /* 13 */
         int nIndexes) /* 14 */
 {
+    __local float refData[3*WSIZE*WSIZE];
+    __local float imData[3*WSIZE*WSIZE];
+    __local float localVal;
+
     struct FArgs args;
     args.projections = projections;
     args.center = center;
@@ -226,6 +261,9 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     args.imCenters = imCenters;
     args.level = level;
     args.nIndexes = nIndexes;
+    args.refData = refData;
+    args.imData = imData;
+    args.localVal = &localVal;
 
     double3 patchVec = patchVecPtr[0];
 
@@ -234,6 +272,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     double3 stepY = (double3)(0,.5,0);
     double3 stepZ = (double3)(0,0,.5);
     int cstep = 0;
+    int nreduce = 0;
     bool didStep = true;
     float val = evalF(patchVec, images, &args);
 
@@ -251,12 +290,17 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
         stepX /= 2.;
         stepY /= 2.;
         stepZ /= 2.;
-        if(fabs(oldval-val) < .001f) break;
+        nreduce++;
+        if(nreduce > 3 && fabs(oldval-val) < .001f) break;
     }
     //float val = evalF(images, projections, center, ray, dscale,
     //    ascale, ipscales, indexes, xaxes, yaxes, zaxes,
     //    imCenters, patchVecPtr[0], level, nIndexes);
     //float val = evalF(patchVecPtr[0], images, &args);
 
-    patchVecPtr[0] = patchVec;
+
+    if(get_local_id(0) == 0 && get_local_id(1) == 0) {
+        patchVecPtr[0] = patchVec;
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
 }

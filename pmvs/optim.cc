@@ -171,11 +171,10 @@ void Coptim::initCLImageArray(cl_command_queue clQueue) {
         rgbToRGBA(imWidth, imHeight, m_fm.m_pss.m_photos[i].imData(m_fm.m_level), rgbaBuffer);
         size_t origin[] = {0,0,i};
         size_t region[] = {imWidth, imHeight, 1};
-        clEnqueueWriteImage(clQueue, m_clImageArray, CL_FALSE,
+        clEnqueueWriteImage(clQueue, m_clImageArray, CL_TRUE,
                 origin, region, 0, 0,
                 rgbaBuffer, NULL, 0, NULL);
     }
-    clFinish(clQueue);
     free(rgbaBuffer);
 }
 
@@ -1387,6 +1386,7 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   // return status messages similar to GSL
   //
   
+  /*
   Vec4f coord, normal;
   decode(coord, normal, p, id);
   Vec4f pxaxis, pyaxis;
@@ -1403,10 +1403,23 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   int id2 = id;
   double r = my_f(x, &id2);
 
-  //printf("patch cent %d %lf\n", id, pxaxis[0]);
-  //printf("my_f val %d %f\n", id, (float)r);
+  printf("my_f val %d %f\n", id, (float)r);
+  */
 
-  clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
+  //clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
+  //clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
+  size_t globalWorkOffset[2] = {0,0};
+  size_t globalWorkSize[2] = {m_fm.m_wsize,m_fm.m_wsize};
+  size_t localWorkSize[2] = {m_fm.m_wsize, m_fm.m_wsize};
+  //size_t globalWorkSize[2] = {1,1};
+  //size_t localWorkSize[2] = {1,1};
+  clErr = clEnqueueNDRangeKernel(m_clQueuesT[id], refineKernel, 2, 
+          globalWorkOffset, globalWorkSize, localWorkSize,
+          0, NULL, NULL);
+  if(clErr < 0) {
+      printf("error launching kernel %d\n", clErr);
+  }
+  for(int i=0; i<3; i++) {p[i] = 1000;}
   clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_TRUE, 0, 3*sizeof(double), p, 0, NULL, NULL);
 
 
@@ -1414,19 +1427,21 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   //printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
   
   
-  //status = GSL_SUCCESS;
+  /*
+  status = GSL_SUCCESS;
 
-  //if (status == GSL_SUCCESS) {
-  //  decode(patch.m_coord, patch.m_normal, p, id);
-  //  
-  //  patch.m_ncc = 1.0 -
-  //    unrobustincc(computeINCC(patch.m_coord,
-  //                             patch.m_normal, patch.m_images, id, 1));
-  //}
-  //else
-  //  patch.m_images.clear();   
-  //
-  //++m_status[status + 2];
+  if (status == GSL_SUCCESS) {
+    decode(patch.m_coord, patch.m_normal, p, id);
+    
+    patch.m_ncc = 1.0 -
+      unrobustincc(computeINCC(patch.m_coord,
+                               patch.m_normal, patch.m_images, id, 1));
+  }
+  else
+    patch.m_images.clear();   
+  
+  ++m_status[status + 2];
+  */
 }
 
 void Coptim::encode(const Vec4f& coord,
