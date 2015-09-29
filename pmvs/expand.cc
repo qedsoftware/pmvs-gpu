@@ -240,7 +240,7 @@ int Cexpand::expandSub(const Ppatch& orgppatch, const int id,
   }
 
   //-----------------------------------------------------------------
-  m_fm.m_optim.refinePatchGPU(patch, id, 100);
+  //m_fm.m_optim.refinePatchGPU(patch, id, 100);
   m_fm.m_optim.refinePatch(patch, id, 100);
 
   //-----------------------------------------------------------------

@@ -1313,14 +1313,14 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
     //status = gsl_multimin_test_size (size, 1e-2);
     status = gsl_multimin_test_size (size, 1e-3);
   } while (status == GSL_CONTINUE && iter < time);
-  printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+  //printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
   p[0] = gsl_vector_get(s->x, 0);
   p[1] = gsl_vector_get(s->x, 1);
   p[2] = gsl_vector_get(s->x, 2);
   
   if (status == GSL_SUCCESS) {
     decode(patch.m_coord, patch.m_normal, p, id);
-    printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+    //printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
     
     patch.m_ncc = 1.0 -
       unrobustincc(computeINCC(patch.m_coord,
@@ -1372,9 +1372,9 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   clEnqueueWriteBuffer(m_clQueuesT[id], m_clIndexesT[id], CL_FALSE, 0, m_indexesT[id].size() * sizeof(int), m_indexesT[id].data(),
           0, NULL, NULL);
   if(m_indexesT[id].size() == 0) printf("empty indexes\n");
-  for(int i=0; i<m_indexesT[id].size(); i++) {
-      if(m_indexesT[id][i] > 7) printf("invalid index %d\n", m_indexesT[id][i]);
-  }
+  //for(int i=0; i<m_indexesT[id].size(); i++) {
+  //    if(m_indexesT[id][i] > 7) printf("invalid index %d\n", m_indexesT[id][i]);
+  //}
 
   clSetKernelArg(refineKernel, 2, 4*sizeof(float), centerVec);
   clSetKernelArg(refineKernel, 3, 4*sizeof(float), rayVec);
