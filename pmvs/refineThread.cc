@@ -1,58 +1,113 @@
 #include "refineThread.h"
 
-PMVS3::CrefineThread(int numExpandThreads, int numRefineThreads) : 
-        m_queue(numExpandThreads),
-        m_numRefineThreads(numRefineThreads),
-        m_isRunning(false)
+using namespace PMVS3;
+
+CrefineThread::CrefineThread(int numPostProcessThreads, CasyncQueue<RefineWorkItem> &postProcessQueue, Coptim &optim) : 
+        m_workQueue(-1),
+        m_idleTaskIds(4),
+        m_maxTasks(4),
+        m_postProcessQueue(postProcessQueue),
+        m_numPostProcessThreads(numPostProcessThreads),
+        m_optim(optim),
+        m_numTasks(0)
 {
-    m_refineThreads = (pthread_t *)malloc(m_numRefineThreads * sizeof(pthread_t));
+    pthread_create(&m_refineThread, NULL, threadLoopTmp, (void*)this);
 }
 
-PMVS3::~CrefineThread() {
-    stopThreads();
-    free(m_refineThreads);
-}
-
-void PMVS3::startThreads() {
-    for(int i=0; i<m_numRefineThreads; i++) {
-        pthread_create(&m_refineThreads[i], NULL, refineThreadTmp, (void*)this);
-    }
-    m_isRunning = true;
-}
-
-void PMVS3::stopThreads() {
+CrefineThread::~CrefineThread() {
+    printf("stopping refine thread\n");
     RefineWorkItem workItem;
-    if(m_isRunning) {
-        workItem.eventType = THREAD_EVENT_STOP;
-        for(int i=0; i<m_numRefineThreads; i++) {
-            m_queue.enqueue(workItem);
-            pthread_join(m_refineThreads[i], NULL);
-        }
-        m_isRunning = false;
-    }
+    workItem.status = REFINE_ALL_TASKS_COMPLETE;
+    enqueueWorkItem(workItem);
+    pthread_join(m_refineThread, NULL);
 }
 
-void CrefineThread::threadLoopTmp(void *args) {
+void CrefineThread::enqueueWorkItem(RefineWorkItem &workItem) {
+    m_workQueue.enqueue(workItem);
+}
+
+void CrefineThread::clearWorkItems() {
+    m_workQueue.clear();
+}
+
+void *CrefineThread::threadLoopTmp(void *args) {
     ((CrefineThread *)args)->threadLoop();
+    return NULL;
 }
 
 void CrefineThread::threadLoop() {
-    refineWorkItem workItem;
+    RefineWorkItem workItem;
+    for(int i=0; i<m_maxTasks; i++) {
+        m_idleTaskIds.enqueue(i);
+    }
     int running = 1;
     while(running) {
-        switch(workItem.eventType) {
-            case THREAD_EVENT_REFINE_PATCH:
-                if(refineQueueFull()) {
-                    flushRefineQueue();
-                }
-                break;
-            case THREAD_EVENT_STOP:
-                flushRefineQueue();
-            default:
+        while(m_numTasks < m_maxTasks) {
+            if(m_numTasks > 0 && m_workQueue.isEmpty()) break;
+            workItem = m_workQueue.dequeue();
+            if(workItem.status == REFINE_ALL_TASKS_COMPLETE) {
                 running = 0;
+                break;
+            }
+            else if(workItem.status == REFINE_TASK_IGNORE) {
+                if(workItem.id >= 0) {
+                  m_idleTaskIds.enqueue(workItem.id);
+                }
+            }
+            else {
+                addTask(workItem);
+                m_numTasks++;
+            }
+        }
+        if(running) {
+            iterateRefineTasks();
+            checkCompletedTasks();
+        }
+    }
+    m_idleTaskIds.clear();
+}
+
+int CrefineThread::getTaskId() {
+    return m_idleTaskIds.dequeue();
+}
+
+void CrefineThread::addTask(RefineWorkItem &workItem) {
+    printf("adding task %d\n", workItem.id);
+    workItem.status = REFINE_TASK_IN_PROGRESS;
+    int taskId = getTaskId();
+    m_taskMap[taskId] = workItem;
+}
+
+void CrefineThread::iterateRefineTasks() {
+    std::map<int, RefineWorkItem>::iterator iter;
+    // manage global OpenCL buffer here with info about each
+    // patch being refined. Call OpenCL kernel to perform
+    // several iterations of minimization on all tasks that
+    // are in progress.
+    //
+    // For now just do original refine routine on CPU to test
+    // batching code.
+    for(iter = m_taskMap.begin(); iter != m_taskMap.end(); iter++) {
+        if(iter->second.status == REFINE_TASK_IN_PROGRESS) {
+            printf("refining %d\n", iter->second.id);
+            m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
+            iter->second.status = REFINE_TASK_COMPLETE;
         }
     }
 }
 
-void CrefineThread::enqueueWorkItem(refineWorkItem &workItem) {
+void CrefineThread::checkCompletedTasks() {
+    std::map<int, RefineWorkItem>::iterator iter;
+    for(iter = m_taskMap.begin(); iter != m_taskMap.end(); iter++) {
+        if(iter->second.status == REFINE_TASK_COMPLETE) {
+            m_idleTaskIds.enqueue(iter->first);
+            m_postProcessQueue.enqueue(iter->second);
+            iter->second.status = REFINE_TASK_IGNORE;
+            m_numTasks--;
+        }
+    }
+}
+
+bool CrefineThread::isWaiting() {
+    return m_workQueue.numWaiting() > 0;
 }
