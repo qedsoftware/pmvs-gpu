@@ -5,6 +5,7 @@
 #include <sstream>
 #include "patch.h"
 #include <gsl/gsl_multimin.h>
+#include <CL/cl.h>
 
 namespace PMVS3 {
   
