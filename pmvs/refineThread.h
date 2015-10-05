@@ -15,6 +15,9 @@ namespace PMVS3 {
         REFINE_TASK_IGNORE
     };
 
+#define REFINE_MAX_TASKS 1024
+#define REFINE_QUEUE_LENGTH 2048
+
     class RefineWorkItem {
         public:
             RefineWorkItem() : id(-1) {};
@@ -29,14 +32,12 @@ namespace PMVS3 {
             ~CrefineThread();
             void enqueueWorkItem(RefineWorkItem &workItem);
             void clearWorkItems();
-            int getTaskId();
             bool isWaiting();
 
         private:
             CasyncQueue<RefineWorkItem> m_workQueue;
-            CasyncQueue<int> m_idleTaskIds;
+            std::queue<int> m_idleTaskIds;
             std::map<int, RefineWorkItem> m_taskMap;
-            int m_maxTasks;
             pthread_t m_refineThread;
             pthread_mutex_t m_workQueueLock;
             pthread_mutex_t m_workTaskIdLock;
@@ -47,6 +48,7 @@ namespace PMVS3 {
 
             static void *threadLoopTmp(void *args);
             void threadLoop();
+            int getTaskId();
             void addTask(RefineWorkItem &workItem);
             void iterateRefineTasks();
             void checkCompletedTasks();

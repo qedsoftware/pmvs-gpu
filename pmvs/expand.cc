@@ -29,10 +29,10 @@ void Cexpand::init(void) {
 void Cexpand::run(void) {
   m_fm.m_count = 0;
   m_fm.m_jobs.clear();
-  m_ecounts.resize(m_fm.m_CPU);
-  m_fcounts0.resize(m_fm.m_CPU);
-  m_fcounts1.resize(m_fm.m_CPU);
-  m_pcounts.resize(m_fm.m_CPU);
+  m_ecounts.resize(REFINE_MAX_TASKS);
+  m_fcounts0.resize(REFINE_MAX_TASKS);
+  m_fcounts1.resize(REFINE_MAX_TASKS);
+  m_pcounts.resize(REFINE_MAX_TASKS);
   fill(m_ecounts.begin(), m_ecounts.end(), 0);
   fill(m_fcounts0.begin(), m_fcounts0.end(), 0);
   fill(m_fcounts1.begin(), m_fcounts1.end(), 0);
@@ -56,7 +56,7 @@ void Cexpand::run(void) {
   pthread_t expandThreads[m_fm.m_CPU];
   pthread_t postProcessThreads[m_fm.m_CPU];
 
-  for(int i=0; i<m_fm.m_CPU; i++) {
+  for(int i=0; i<REFINE_MAX_TASKS; i++) {
     m_idQueue.enqueue(i);
   }
 

@@ -20,21 +20,21 @@ Coptim::Coptim(CfindMatch& findMatch) : m_fm(findMatch) {
 }
 
 void Coptim::init(void) {
-  m_centersT.resize(m_fm.m_CPU);
-  m_raysT.resize(m_fm.m_CPU);
-  m_indexesT.resize(m_fm.m_CPU);
-  m_dscalesT.resize(m_fm.m_CPU);
-  m_ascalesT.resize(m_fm.m_CPU);
-  m_paramsT.resize(m_fm.m_CPU);
-  m_clQueuesT.resize(m_fm.m_CPU);
-  m_clKernelsT.resize(m_fm.m_CPU);
-  m_clPatchParamsT.resize(m_fm.m_CPU);
-  m_clEncodedVecsT.resize(m_fm.m_CPU);
+  m_centersT.resize(REFINE_MAX_TASKS);
+  m_raysT.resize(REFINE_MAX_TASKS);
+  m_indexesT.resize(REFINE_MAX_TASKS);
+  m_dscalesT.resize(REFINE_MAX_TASKS);
+  m_ascalesT.resize(REFINE_MAX_TASKS);
+  m_paramsT.resize(REFINE_MAX_TASKS);
+  m_clQueuesT.resize(REFINE_MAX_TASKS);
+  m_clKernelsT.resize(REFINE_MAX_TASKS);
+  m_clPatchParamsT.resize(REFINE_MAX_TASKS);
+  m_clEncodedVecsT.resize(REFINE_MAX_TASKS);
   
-  m_texsT.resize(m_fm.m_CPU);
-  m_weightsT.resize(m_fm.m_CPU);
+  m_texsT.resize(REFINE_MAX_TASKS);
+  m_weightsT.resize(REFINE_MAX_TASKS);
 
-  for (int c = 0; c < m_fm.m_CPU; ++c) {
+  for (int c = 0; c < REFINE_MAX_TASKS; ++c) {
     m_texsT[c].resize(m_fm.m_num);
     m_weightsT[c].resize(m_fm.m_num);
     for (int j = 0; j < m_fm.m_tau; ++j)
@@ -1281,14 +1281,14 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
     //status = gsl_multimin_test_size (size, 1e-2);
     status = gsl_multimin_test_size (size, 1e-3);
   } while (status == GSL_CONTINUE && iter < time);
-  printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+  //printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
   p[0] = gsl_vector_get(s->x, 0);
   p[1] = gsl_vector_get(s->x, 1);
   p[2] = gsl_vector_get(s->x, 2);
   
   if (status == GSL_SUCCESS) {
     decode(patch.m_coord, patch.m_normal, p, id);
-    printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+    //printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
     
     patch.m_ncc = 1.0 -
       unrobustincc(computeINCC(patch.m_coord,

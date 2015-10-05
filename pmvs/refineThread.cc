@@ -3,9 +3,7 @@
 using namespace PMVS3;
 
 CrefineThread::CrefineThread(int numPostProcessThreads, CasyncQueue<RefineWorkItem> &postProcessQueue, Coptim &optim) : 
-        m_workQueue(-1),
-        m_idleTaskIds(4),
-        m_maxTasks(4),
+        m_workQueue(REFINE_QUEUE_LENGTH),
         m_postProcessQueue(postProcessQueue),
         m_numPostProcessThreads(numPostProcessThreads),
         m_optim(optim),
@@ -37,12 +35,12 @@ void *CrefineThread::threadLoopTmp(void *args) {
 
 void CrefineThread::threadLoop() {
     RefineWorkItem workItem;
-    for(int i=0; i<m_maxTasks; i++) {
-        m_idleTaskIds.enqueue(i);
+    for(int i=0; i<REFINE_MAX_TASKS; i++) {
+        m_idleTaskIds.push(i);
     }
     int running = 1;
     while(running) {
-        while(m_numTasks < m_maxTasks) {
+        while(m_numTasks < REFINE_MAX_TASKS) {
             if(m_numTasks > 0 && m_workQueue.isEmpty()) break;
             workItem = m_workQueue.dequeue();
             if(workItem.status == REFINE_ALL_TASKS_COMPLETE) {
@@ -50,9 +48,6 @@ void CrefineThread::threadLoop() {
                 break;
             }
             else if(workItem.status == REFINE_TASK_IGNORE) {
-                if(workItem.id >= 0) {
-                  m_idleTaskIds.enqueue(workItem.id);
-                }
             }
             else {
                 addTask(workItem);
@@ -64,11 +59,15 @@ void CrefineThread::threadLoop() {
             checkCompletedTasks();
         }
     }
-    m_idleTaskIds.clear();
+    while(m_idleTaskIds.size() > 0) {
+        m_idleTaskIds.pop();
+    }
 }
 
 int CrefineThread::getTaskId() {
-    return m_idleTaskIds.dequeue();
+    int taskId = m_idleTaskIds.front();
+    m_idleTaskIds.pop();
+    return taskId;
 }
 
 void CrefineThread::addTask(RefineWorkItem &workItem) {
@@ -88,7 +87,7 @@ void CrefineThread::iterateRefineTasks() {
     // batching code.
     for(iter = m_taskMap.begin(); iter != m_taskMap.end(); iter++) {
         if(iter->second.status == REFINE_TASK_IN_PROGRESS) {
-            m_optim.refinePatchGPU(*(iter->second.patch), iter->second.id, 100);
+            //m_optim.refinePatchGPU(*(iter->second.patch), iter->second.id, 100);
             m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
             iter->second.status = REFINE_TASK_COMPLETE;
         }
@@ -99,7 +98,7 @@ void CrefineThread::checkCompletedTasks() {
     std::map<int, RefineWorkItem>::iterator iter;
     for(iter = m_taskMap.begin(); iter != m_taskMap.end(); iter++) {
         if(iter->second.status == REFINE_TASK_COMPLETE) {
-            m_idleTaskIds.enqueue(iter->first);
+            m_idleTaskIds.push(iter->first);
             m_postProcessQueue.enqueue(iter->second);
             iter->second.status = REFINE_TASK_IGNORE;
             m_numTasks--;
