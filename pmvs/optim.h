@@ -6,11 +6,30 @@
 #include "patch.h"
 #include <gsl/gsl_multimin.h>
 #include <CL/cl.h>
+#include <CL/cl_platform.h>
 
 namespace PMVS3 {
   
 class CfindMatch;
- 
+
+typedef struct _CLImageParams {
+    cl_float4 projection[3];
+    cl_float3 xaxis;
+    cl_float3 yaxis;
+    cl_float3 zaxis;
+    cl_float4 center;
+    cl_float ipscale;
+} CLImageParams;
+
+typedef struct _CLPatchParams {
+    cl_float4 center;
+    cl_float4 ray;
+    cl_float dscale;
+    cl_float ascale;
+    cl_int nIndexes;
+    cl_int indexes[10];
+} CLPatchParams;
+
 class Coptim {
  public:
   Coptim(CfindMatch& findMatch);
@@ -20,7 +39,7 @@ class Coptim {
   static void rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out);
   void initCL();
   void initCLImageArray(cl_command_queue clQueue);
-  void initCLImageObjects(cl_command_queue clQueue);
+  void initCLImageParams(cl_command_queue clQueue);
   void initCLThreadObjects(int id);
   void destroyCL();
 
@@ -203,19 +222,14 @@ class Coptim {
   // CL image array
   cl_mem m_clImageArray;
 
-  // CL per image objects
-  cl_mem m_clIProjections;
-  cl_mem m_clIXAxes;
-  cl_mem m_clIYAxes;
-  cl_mem m_clIZAxes;
-  cl_mem m_clICenters;
-  cl_mem m_clIPScales;
+  // CL params
+  cl_mem m_clImageParams;
 
-  // CL per thread objects
+  // per thread (temporarily)
+  std::vector<cl_mem> m_clPatchParamsT;
+  std::vector<cl_mem> m_clEncodedVecsT;
   std::vector<cl_command_queue> m_clQueuesT;
   std::vector<cl_kernel> m_clKernelsT;
-  std::vector<cl_mem> m_clIndexesT;
-  std::vector<cl_mem> m_clPatchVecsT;
 
   // stores current parameters for derivative computation
   std::vector<Vec3f> m_paramsT;

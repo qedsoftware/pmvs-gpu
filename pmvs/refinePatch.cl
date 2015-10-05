@@ -1,21 +1,29 @@
 #define WSIZE <WSIZE>
 const sampler_t imSampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
 
-struct FArgs {
-    __constant float4 *projections;
+typedef struct _ImageParams {
+    float4 projection[3];
+    float3 xaxis;
+    float3 yaxis;
+    float3 zaxis;
+    float4 center;
+    float ipscale;
+} ImageParams;
+
+typedef struct _PatchParams {
     float4 center;
     float4 ray;
     float dscale;
     float ascale;
-    __constant float *ipscales;
-    __constant int *indexes;
-    __constant float3 *xaxes;
-    __constant float3 *yaxes;
-    __constant float3 *zaxes;
-    __constant float4 *imCenters;
-    double3 patchVec;
-    int level;
     int nIndexes;
+    int indexes[10];
+    float3 encodedVec;
+} PatchParams;
+
+struct FArgs {
+    PatchParams patch;
+    __constant ImageParams *images;
+    int level;
     __local float *refData;
     __local float *imData;
     __local float *localVal;
@@ -172,24 +180,24 @@ float evalF(double3 patchVec,
         struct FArgs *args) {
     size_t localX = get_local_id(0);
     size_t localY = get_local_id(1);
-    float4 coord = decodeCoord(args->center, args->ray, args->dscale, patchVec);
-    int refIdx = args->indexes[0];
-    float4 normal = decodeNormal(args->xaxes[refIdx], args->yaxes[refIdx], args->zaxes[refIdx],
-           args->ascale, patchVec);
-    float pscale = getUnit(args->imCenters[refIdx], args->ipscales[refIdx], coord, args->level);
+    float4 coord = decodeCoord(args->patch.center, args->patch.ray, args->patch.dscale, patchVec);
+    int refIdx = args->patch.indexes[0];
+    float4 normal = decodeNormal(args->images[refIdx].xaxis, args->images[refIdx].yaxis, args->images[refIdx].zaxis,
+           args->patch.ascale, patchVec);
+    float pscale = getUnit(args->images[refIdx].center, args->images[refIdx].ipscale, coord, args->level);
     float3 normal3 = (float3)(normal.x, normal.y, normal.z);
-    float3 yaxis3 = normalize(cross(normal3, args->xaxes[refIdx]));
+    float3 yaxis3 = normalize(cross(normal3, args->images[refIdx].xaxis));
     float3 xaxis3 = cross(yaxis3, normal3);
-    __constant float4 *refProj = args->projections + 3*refIdx;
+    __constant float4 *refProj = args->images[refIdx].projection;
     float4 pxaxis = getPAxis(refProj, coord, normal, xaxis3, pscale);
     float4 pyaxis = getPAxis(refProj, coord, normal, yaxis3, pscale);
-    grabTex(images, refIdx, refProj, args->imCenters[refIdx], coord, pxaxis, pyaxis, normal, args->refData);
+    grabTex(images, refIdx, refProj, args->images[refIdx].center, coord, pxaxis, pyaxis, normal, args->refData);
     float ans = 0.;
     int denom = 0;
-    for(int i=1; i < args->nIndexes; i++) {
-        int imIdx = args->indexes[i];
-        __constant float4 *imProj = args->projections + 3*imIdx;
-        grabTex(images, imIdx, imProj, args->imCenters[imIdx], coord, pxaxis, pyaxis, normal, args->imData);
+    for(int i=1; i < args->patch.nIndexes; i++) {
+        int imIdx = args->patch.indexes[i];
+        __constant float4 *imProj = args->images[imIdx].projection;
+        grabTex(images, imIdx, imProj, args->images[imIdx].center, coord, pxaxis, pyaxis, normal, args->imData);
         float corr = 0.;
         if(localX == 0 && localY == 0) {
             for(int j=0; j<WSIZE*WSIZE*3; j++) {
@@ -228,44 +236,25 @@ double3 testStep(double3 patchVec, double3 step, __read_only image2d_array_t ima
 }
 
 __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
-        __constant float4 *projections, /* 1 */
-        float4 center, /* 2 */
-        float4 ray, /* 3 */
-        float dscale, /* 4 */
-        float ascale, /* 5 */
-        __constant float *ipscales, /* 6 */
-        __constant int *indexes, /* 7 */
-        __constant float3 *xaxes, /* 8 */
-        __constant float3 *yaxes, /* 9 */
-        __constant float3 *zaxes, /* 10 */
-        __constant float4 *imCenters, /* 11 */
-        __global double3 *patchVecPtr, /* 12 */ 
-        int level, /* 13 */
-        int nIndexes) /* 14 */
+        __constant ImageParams *imageParams, /* 1 */
+        __global PatchParams *patchParams, /* 2 */
+        int level, /* 3 */
+        __global double3 *encodedVecs) /* 4 */
 {
     __local float refData[3*WSIZE*WSIZE];
     __local float imData[3*WSIZE*WSIZE];
     __local float localVal;
 
+    __global PatchParams *myPatchParams = patchParams;
+    double3 patchVec = encodedVecs[0];
+
     struct FArgs args;
-    args.projections = projections;
-    args.center = center;
-    args.ray = ray;
-    args.dscale = dscale;
-    args.ascale = ascale;
-    args.ipscales = ipscales;
-    args.indexes = indexes;
-    args.xaxes = xaxes;
-    args.yaxes = yaxes;
-    args.zaxes = zaxes;
-    args.imCenters = imCenters;
+    args.images = imageParams;
+    args.patch = *myPatchParams;
     args.level = level;
-    args.nIndexes = nIndexes;
     args.refData = refData;
     args.imData = imData;
     args.localVal = &localVal;
-
-    double3 patchVec = patchVecPtr[0];
 
     int maxSteps = 1000;
     double3 stepX = (double3)(.1,0,0);
@@ -300,7 +289,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
 
 
     if(get_local_id(0) == 0 && get_local_id(1) == 0) {
-        patchVecPtr[0] = patchVec;
+        encodedVecs[0] = patchVec;
     }
     barrier(CLK_GLOBAL_MEM_FENCE);
 }

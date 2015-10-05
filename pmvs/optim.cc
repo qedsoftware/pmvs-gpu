@@ -28,8 +28,8 @@ void Coptim::init(void) {
   m_paramsT.resize(m_fm.m_CPU);
   m_clQueuesT.resize(m_fm.m_CPU);
   m_clKernelsT.resize(m_fm.m_CPU);
-  m_clIndexesT.resize(m_fm.m_CPU);
-  m_clPatchVecsT.resize(m_fm.m_CPU);
+  m_clPatchParamsT.resize(m_fm.m_CPU);
+  m_clEncodedVecsT.resize(m_fm.m_CPU);
   
   m_texsT.resize(m_fm.m_CPU);
   m_weightsT.resize(m_fm.m_CPU);
@@ -130,7 +130,7 @@ void Coptim::initCL() {
     cl_command_queue clQueue = clCreateCommandQueue(m_clCtx, m_clDevice, 0, &clErr);
 
     initCLImageArray(clQueue);
-    initCLImageObjects(clQueue);
+    initCLImageParams(clQueue);
 
     clReleaseCommandQueue(clQueue);
 
@@ -178,44 +178,32 @@ void Coptim::initCLImageArray(cl_command_queue clQueue) {
     free(rgbaBuffer);
 }
 
-void Coptim::initCLImageObjects(cl_command_queue clQueue) {
+void Coptim::initCLImageParams(cl_command_queue clQueue) {
     cl_int clErr;
 
-    size_t projDataSize = m_fm.m_num * 3 * 4 * sizeof(float);
-    float *imProjectionData = (float *)malloc(projDataSize);
-    float *cptr = imProjectionData;
+    CLImageParams imParams[m_fm.m_num];
+
     for(int i=0; i<m_fm.m_num; i++) {
         for(int j=0; j<3; j++) {
             for(int k=0; k<4; k++) {
-                *cptr = m_fm.m_pss.m_photos[i].m_projection[m_fm.m_level][j][k];
-                cptr++;
+                imParams[i].projection[j].s[k] = m_fm.m_pss.m_photos[i].m_projection[m_fm.m_level][j][k];
             }
         }
-    }
-    m_clIProjections = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, projDataSize, NULL, &clErr);
-    clEnqueueWriteBuffer(clQueue, m_clIProjections, CL_TRUE, 0, projDataSize, imProjectionData, 0, NULL, NULL);
-    free(imProjectionData);
-
-    axesToBuffer(clQueue, m_xaxes, m_clIXAxes);
-    axesToBuffer(clQueue, m_yaxes, m_clIYAxes);
-    axesToBuffer(clQueue, m_zaxes, m_clIZAxes);
-
-    float centerBuffer[4*m_fm.m_num];
-    for(int i=0; i<m_fm.m_num; i++) {
-        for(int j=0; j<4; j++) {
-            centerBuffer[i*4+j] = m_fm.m_pss.m_photos[i].m_center[j];
+        for(int j=0; j<3; j++) {
+            imParams[i].xaxis.s[j] = m_xaxes[i][j];
+            imParams[i].yaxis.s[j] = m_yaxes[i][j];
+            imParams[i].zaxis.s[j] = m_zaxes[i][j];
         }
+        for(int j=0; j<4; j++) {
+            imParams[i].center.s[j] = m_fm.m_pss.m_photos[i].m_center[j];
+        }
+        imParams[i].ipscale = m_ipscales[i];
     }
-    m_clICenters = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, 4*m_fm.m_num*sizeof(float), NULL, &clErr);
+    m_clImageParams = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, m_fm.m_num*sizeof(CLImageParams), NULL, &clErr);
     if(clErr < 0) {
-        printf("error creating ImCenters buffer %d\n", clErr);
+        printf("error creating ImageParams buffer %d\n", clErr);
     }
-    m_clIPScales = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, m_fm.m_num*sizeof(float), NULL, &clErr);
-    if(clErr < 0) {
-        printf("error creating IPScales buffer %d\n", clErr);
-    }
-    clEnqueueWriteBuffer(clQueue, m_clICenters, CL_TRUE, 0, 4*m_fm.m_num*sizeof(float), centerBuffer, 0, NULL, NULL);
-    clEnqueueWriteBuffer(clQueue, m_clIPScales, CL_TRUE, 0, m_fm.m_num*sizeof(float), m_ipscales.data(), 0, NULL, NULL);
+    clEnqueueWriteBuffer(clQueue, m_clImageParams, CL_TRUE, 0, m_fm.m_num*sizeof(CLImageParams), imParams, 0, NULL, NULL);
 }
 
 void Coptim::initCLThreadObjects(int id) {
@@ -236,51 +224,31 @@ void Coptim::initCLThreadObjects(int id) {
   if(clErr < 0) {
       printf("error setKernelArg 0 %d\n", clErr);
   }
-  clErr = clSetKernelArg(m_clKernelsT[id], 1, sizeof(cl_mem), &m_clIProjections);
+  clErr = clSetKernelArg(m_clKernelsT[id], 1, sizeof(cl_mem), &m_clImageParams);
   if(clErr < 0) {
       printf("error setKernelArg 1 %d\n", clErr);
   }
 
-  m_clIndexesT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, m_fm.m_pss.m_num * sizeof(int), NULL, &clErr);
+  m_clPatchParamsT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, sizeof(CLPatchParams), NULL, &clErr);
   if(clErr < 0) {
-      printf("error createBuffer indexes %d\n", clErr);
+      printf("error createBuffer PatchParams %d\n", clErr);
   }
-  m_clPatchVecsT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, 3 * sizeof(double), NULL, &clErr);
+  clErr = clSetKernelArg(m_clKernelsT[id], 2, sizeof(cl_mem), &m_clPatchParamsT[id]);
   if(clErr < 0) {
-      printf("error createBuffer patchVecs %d\n", clErr);
+      printf("error setKernelArg 2 %d\n", clErr);
+  }
+  clErr = clSetKernelArg(m_clKernelsT[id], 3, sizeof(int), &m_fm.m_level);
+  if(clErr < 0) {
+      printf("error setKernelArg 3 %d\n", clErr);
   }
 
-  clErr = clSetKernelArg(m_clKernelsT[id], 6, sizeof(cl_mem), &m_clIPScales);
+  m_clEncodedVecsT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, sizeof(cl_double3), NULL, &clErr);
   if(clErr < 0) {
-      printf("error setKernelArg 6 %d\n", clErr);
+      printf("error createBuffer EncodedVecs %d\n", clErr);
   }
-  clErr = clSetKernelArg(m_clKernelsT[id], 7, sizeof(cl_mem), &m_clIndexesT[id]);
+  clErr = clSetKernelArg(m_clKernelsT[id], 4, sizeof(cl_mem), &m_clEncodedVecsT[id]);
   if(clErr < 0) {
-      printf("error setKernelArg 7 %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 8, sizeof(cl_mem), &m_clIXAxes);
-  if(clErr < 0) {
-      printf("error setKernelArg 8 %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 9, sizeof(cl_mem), &m_clIYAxes);
-  if(clErr < 0) {
-      printf("error setKernelArg 9 %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 10, sizeof(cl_mem), &m_clIZAxes);
-  if(clErr < 0) {
-      printf("error setKernelArg 10 %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 11, sizeof(cl_mem), &m_clICenters);
-  if(clErr < 0) {
-      printf("error setKernelArg 11 %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 12, sizeof(cl_mem), &m_clPatchVecsT[id]);
-  if(clErr < 0) {
-      printf("error setKernelArg 12 %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 13, sizeof(int), &m_fm.m_level);
-  if(clErr < 0) {
-      printf("error setKernelArg 13 %d\n", clErr);
+      printf("error setKernelArg 4 %d\n", clErr);
   }
 }
 
@@ -1313,14 +1281,14 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
     //status = gsl_multimin_test_size (size, 1e-2);
     status = gsl_multimin_test_size (size, 1e-3);
   } while (status == GSL_CONTINUE && iter < time);
-  //printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+  printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
   p[0] = gsl_vector_get(s->x, 0);
   p[1] = gsl_vector_get(s->x, 1);
   p[2] = gsl_vector_get(s->x, 2);
   
   if (status == GSL_SUCCESS) {
     decode(patch.m_coord, patch.m_normal, p, id);
-    //printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+    printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
     
     patch.m_ncc = 1.0 -
       unrobustincc(computeINCC(patch.m_coord,
@@ -1367,20 +1335,28 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
   encode(patch.m_coord, patch.m_normal, p, id);
 
   cl_kernel refineKernel = m_clKernelsT[id];
+  CLPatchParams patchParams;
 
-  clEnqueueWriteBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_FALSE, 0, 3*sizeof(double), p, 0, NULL, NULL);
-  clEnqueueWriteBuffer(m_clQueuesT[id], m_clIndexesT[id], CL_FALSE, 0, m_indexesT[id].size() * sizeof(int), m_indexesT[id].data(),
-          0, NULL, NULL);
+  for(int i=0; i<m_indexesT[id].size(); i++) {
+      patchParams.indexes[i] = m_indexesT[id][i];
+  }
   if(m_indexesT[id].size() == 0) printf("empty indexes\n");
   //for(int i=0; i<m_indexesT[id].size(); i++) {
   //    if(m_indexesT[id][i] > 7) printf("invalid index %d\n", m_indexesT[id][i]);
   //}
 
-  clSetKernelArg(refineKernel, 2, 4*sizeof(float), centerVec);
-  clSetKernelArg(refineKernel, 3, 4*sizeof(float), rayVec);
-  clSetKernelArg(refineKernel, 4, sizeof(float), &patch.m_dscale);
-  clSetKernelArg(refineKernel, 5, sizeof(float), &ascale);
-  clSetKernelArg(refineKernel, 14, sizeof(int), &size);
+  for(int i=0; i<4; i++) {
+      patchParams.center.s[i] = centerVec[i];
+      patchParams.ray.s[i] = rayVec[i];
+  }
+  patchParams.dscale = patch.m_dscale;
+  patchParams.ascale = ascale;
+  patchParams.nIndexes = size;
+
+  clEnqueueWriteBuffer(m_clQueuesT[id], m_clPatchParamsT[id], CL_FALSE, 0, sizeof(patchParams), &patchParams,
+          0, NULL, NULL);
+  clEnqueueWriteBuffer(m_clQueuesT[id], m_clEncodedVecsT[id], CL_FALSE, 0, 3*sizeof(double), p,
+          0, NULL, NULL);
 
   // call GPU min`and store result to p
   // return status messages similar to GSL
@@ -1420,7 +1396,7 @@ void Coptim::refinePatchGPU(Cpatch& patch, const int id,
       printf("error launching kernel %d\n", clErr);
   }
   for(int i=0; i<3; i++) {p[i] = 1000;}
-  clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clPatchVecsT[id], CL_TRUE, 0, 3*sizeof(double), p, 0, NULL, NULL);
+  clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clEncodedVecsT[id], CL_TRUE, 0, 3*sizeof(double), p, 0, NULL, NULL);
 
 
   printf("buffer val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);

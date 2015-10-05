@@ -72,7 +72,6 @@ int CrefineThread::getTaskId() {
 }
 
 void CrefineThread::addTask(RefineWorkItem &workItem) {
-    printf("adding task %d\n", workItem.id);
     workItem.status = REFINE_TASK_IN_PROGRESS;
     int taskId = getTaskId();
     m_taskMap[taskId] = workItem;
@@ -89,7 +88,7 @@ void CrefineThread::iterateRefineTasks() {
     // batching code.
     for(iter = m_taskMap.begin(); iter != m_taskMap.end(); iter++) {
         if(iter->second.status == REFINE_TASK_IN_PROGRESS) {
-            printf("refining %d\n", iter->second.id);
+            m_optim.refinePatchGPU(*(iter->second.patch), iter->second.id, 100);
             m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
             iter->second.status = REFINE_TASK_COMPLETE;
         }
