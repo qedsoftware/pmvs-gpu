@@ -17,7 +17,7 @@ namespace PMVS3 {
         REFINE_TASK_IGNORE
     };
 
-#define REFINE_MAX_TASKS 1024
+#define REFINE_MAX_TASKS 256
 #define REFINE_QUEUE_LENGTH 2048
 
     typedef struct _CLImageParams {
@@ -93,6 +93,7 @@ namespace PMVS3 {
             cl_mem m_clPatchParams;
             cl_mem m_clEncodedVecs;
             cl_double4 m_idleVec;
+            cl_double4 *m_encodedVecs;
 
             void initCL();
             static void rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out);
@@ -100,7 +101,7 @@ namespace PMVS3 {
             void initCLImageParams();
             void initCLPatchParams();
             void destroyCL();
-            void refinePatchGPU(RefineWorkItem &workItem);
+            void refinePatchesGPU();
 
             static void *threadLoopTmp(void *args);
             void threadLoop();

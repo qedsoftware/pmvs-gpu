@@ -17,7 +17,6 @@ typedef struct _PatchParams {
     float ascale;
     int nIndexes;
     int indexes[10];
-    float3 encodedVec;
 } PatchParams;
 
 struct FArgs {
@@ -245,8 +244,10 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     __local float imData[3*WSIZE*WSIZE];
     __local float localVal;
 
-    __global PatchParams *myPatchParams = patchParams;
-    double4 encodedVec = encodedVecs[0];
+    size_t groupId = get_group_id(0);
+
+    __global PatchParams *myPatchParams = patchParams + groupId;
+    double4 encodedVec = encodedVecs[groupId];
     double3 patchVec = (double3)(encodedVec.x, encodedVec.y, encodedVec.z);
 
     struct FArgs args;
@@ -287,11 +288,10 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     //    imCenters, patchVecPtr[0], level, nIndexes);
     //float val = evalF(patchVecPtr[0], images, &args);
 
-
     if(get_local_id(0) == 0 && get_local_id(1) == 0) {
-        encodedVecs[0].x = patchVec.x;
-        encodedVecs[0].y = patchVec.y;
-        encodedVecs[0].z = patchVec.z;
+        encodedVecs[groupId].x = patchVec.x;
+        encodedVecs[groupId].y = patchVec.y;
+        encodedVecs[groupId].z = patchVec.z;
     }
     barrier(CLK_GLOBAL_MEM_FENCE);
 }

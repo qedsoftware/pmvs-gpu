@@ -14,6 +14,7 @@ CrefineThread::CrefineThread(int numPostProcessThreads, CasyncQueue<RefineWorkIt
         m_initialized(false)
 {
     m_idleVec = {0,0,0,-1};
+    m_encodedVecs = (cl_double4 *)malloc(REFINE_MAX_TASKS*sizeof(cl_double4));
 }
 
 CrefineThread::~CrefineThread() {
@@ -26,6 +27,7 @@ CrefineThread::~CrefineThread() {
         destroyCL();
         m_initialized = false;
     }
+    free(m_encodedVecs);
 }
 
 void CrefineThread::init() {
@@ -214,51 +216,12 @@ void CrefineThread::destroyCL() {
     clReleaseCommandQueue(m_clQueue);
 }
 
-void CrefineThread::refinePatchGPU(RefineWorkItem &workItem) {
+void CrefineThread::refinePatchesGPU() {
   int status;
   cl_int clErr;
-  double p[4];
 
-  writeParamsToBuffer(0, *workItem.patchParams);
-  writeEncodedVecToBuffer(0, workItem.encodedVec);
-  /*
-  clErr = clEnqueueWriteBuffer(m_clQueue, m_clPatchParams, CL_FALSE, 0, sizeof(CLPatchParams), workItem.patchParams.get(),
-          0, NULL, NULL);
-  if(clErr < 0) {
-      printf("error writing PatchParams buffer\n");
-  }
-  clErr = clEnqueueWriteBuffer(m_clQueue, m_clEncodedVecs, CL_FALSE, 0, 4*sizeof(double), workItem.encodedVec,
-          0, NULL, NULL);
-  */
-
-  // call GPU min`and store result to p
-  // return status messages similar to GSL
-  //
-  
-  /*
-  Vec4f coord, normal;
-  decode(coord, normal, p, id);
-  Vec4f pxaxis, pyaxis;
-  const int index = m_one->m_indexesT[id][0];
-  m_one->getPAxes(index, coord, normal, pxaxis, pyaxis);
-  const float pscale = getUnit(index, coord);
-  int flag = grabTex(coord, pxaxis, pyaxis, normal, index,
-                          m_fm.m_wsize, m_texsT[id][0]);
-  float fz = norm(coord - m_fm.m_pss.m_photos[index].m_center);
-  gsl_vector* x = gsl_vector_alloc (3);
-  gsl_vector_set(x, 0, p[0]);
-  gsl_vector_set(x, 1, p[1]);
-  gsl_vector_set(x, 2, p[2]);
-  int id2 = id;
-  double r = my_f(x, &id2);
-
-  printf("my_f val %d %f\n", id, (float)r);
-  */
-
-  //clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
-  //clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
   size_t globalWorkOffset[2] = {0,0};
-  size_t globalWorkSize[2] = {m_fm.m_wsize,m_fm.m_wsize};
+  size_t globalWorkSize[2] = {REFINE_MAX_TASKS*m_fm.m_wsize,m_fm.m_wsize};
   size_t localWorkSize[2] = {m_fm.m_wsize, m_fm.m_wsize};
   //size_t globalWorkSize[2] = {1,1};
   //size_t localWorkSize[2] = {1,1};
@@ -268,10 +231,11 @@ void CrefineThread::refinePatchGPU(RefineWorkItem &workItem) {
   if(clErr < 0) {
       printf("error launching kernel %d\n", clErr);
   }
-  for(int i=0; i<3; i++) {p[i] = 1000;}
-  clErr = clEnqueueReadBuffer(m_clQueue, m_clEncodedVecs, CL_TRUE, 0, 3*sizeof(double), p, 0, NULL, NULL);
+  clErr = clEnqueueReadBuffer(m_clQueue, m_clEncodedVecs, CL_TRUE, 0, REFINE_MAX_TASKS*sizeof(cl_double4), m_encodedVecs, 0, NULL, NULL);
+  if(clErr < 0) {
+      printf("error reading encoded vecs %d\n", clErr);
+  }
 
-  printf("buffer val %lf %lf %lf\n", p[0], p[1], p[2]);
   //printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
   
   
@@ -347,6 +311,8 @@ void CrefineThread::addTask(RefineWorkItem &workItem) {
     workItem.status = REFINE_TASK_IN_PROGRESS;
     workItem.taskId = getTaskId();
     m_taskMap[workItem.taskId] = workItem;
+    writeParamsToBuffer(workItem.taskId, *workItem.patchParams);
+    writeEncodedVecToBuffer(workItem.taskId, workItem.encodedVec);
 }
 
 void CrefineThread::iterateRefineTasks() {
@@ -356,12 +322,15 @@ void CrefineThread::iterateRefineTasks() {
     // several iterations of minimization on all tasks that
     // are in progress.
     //
+    refinePatchesGPU();
+
     // For now just do original refine routine on CPU to test
     // batching code.
     for(iter = m_taskMap.begin(); iter != m_taskMap.end(); iter++) {
         if(iter->second.status == REFINE_TASK_IN_PROGRESS) {
             //refinePatchGPU(*(iter->second.patch), iter->second.id, 100);
-            refinePatchGPU(iter->second);
+            cl_double4 buff = m_encodedVecs[iter->second.taskId];
+            printf("buffer val %lf %lf %lf %lf\n", buff.x, buff.y, buff.z, buff.w);
             m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
             iter->second.status = REFINE_TASK_COMPLETE;
         }
@@ -376,6 +345,7 @@ void CrefineThread::checkCompletedTasks() {
             m_postProcessQueue.enqueue(iter->second);
             iter->second.status = REFINE_TASK_IGNORE;
             m_numTasks--;
+            writeEncodedVecToBuffer(iter->second.taskId, m_idleVec);
         }
     }
 }
