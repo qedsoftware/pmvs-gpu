@@ -530,7 +530,7 @@ void Coptim::setImageParams(int i, CLImageParams &imParams) {
     imParams.ipscale = m_ipscales[i];
 }
 
-void Coptim::setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, double *encodedVec) {
+void Coptim::setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, cl_double4 &encodedVec) {
   m_indexesT[id] = patch.m_images;
   const int size = min(m_fm.m_tau, (int)m_indexesT[id].size());
   
@@ -553,7 +553,8 @@ void Coptim::setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchPa
     m_weightsT[id][i] = min(1.0f, m_weightsT[id][0] / m_weightsT[id][i]);  
   m_weightsT[id][0] = 1.0f;
   
-  encode(patch.m_coord, patch.m_normal, encodedVec, id);
+  encode(patch.m_coord, patch.m_normal, encodedVec.s, id);
+  encodedVec.s[3] = 1;
 
   for(int i=0; i<m_indexesT[id].size(); i++) {
       patchParams.indexes[i] = m_indexesT[id][i];

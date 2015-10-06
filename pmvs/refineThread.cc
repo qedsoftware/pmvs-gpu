@@ -13,6 +13,7 @@ CrefineThread::CrefineThread(int numPostProcessThreads, CasyncQueue<RefineWorkIt
         m_numTasks(0),
         m_initialized(false)
 {
+    m_idleVec = {0,0,0,-1};
 }
 
 CrefineThread::~CrefineThread() {
@@ -203,7 +204,7 @@ void CrefineThread::initCLPatchParams() {
   if(clErr < 0) {
       printf("error createBuffer PatchParams %d\n", clErr);
   }
-  m_clEncodedVecs = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, REFINE_MAX_TASKS*sizeof(cl_double3), NULL, &clErr);
+  m_clEncodedVecs = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, REFINE_MAX_TASKS*sizeof(cl_double4), NULL, &clErr);
   if(clErr < 0) {
       printf("error createBuffer EncodedVecs %d\n", clErr);
   }
@@ -216,17 +217,19 @@ void CrefineThread::destroyCL() {
 void CrefineThread::refinePatchGPU(RefineWorkItem &workItem) {
   int status;
   cl_int clErr;
-  double p[3];
+  double p[4];
 
-  //m_optim.setPatchParams(patch, id, patchParams, p);
-
-  clErr = clEnqueueWriteBuffer(m_clQueue, m_clPatchParams, CL_FALSE, 0, sizeof(CLPatchParams), &workItem.patchParams,
+  writeParamsToBuffer(0, *workItem.patchParams);
+  writeEncodedVecToBuffer(0, workItem.encodedVec);
+  /*
+  clErr = clEnqueueWriteBuffer(m_clQueue, m_clPatchParams, CL_FALSE, 0, sizeof(CLPatchParams), workItem.patchParams.get(),
           0, NULL, NULL);
   if(clErr < 0) {
       printf("error writing PatchParams buffer\n");
   }
-  clErr = clEnqueueWriteBuffer(m_clQueue, m_clEncodedVecs, CL_FALSE, 0, 3*sizeof(double), workItem.encodedVec,
+  clErr = clEnqueueWriteBuffer(m_clQueue, m_clEncodedVecs, CL_FALSE, 0, 4*sizeof(double), workItem.encodedVec,
           0, NULL, NULL);
+  */
 
   // call GPU min`and store result to p
   // return status messages similar to GSL
@@ -306,6 +309,7 @@ void CrefineThread::threadLoop() {
     RefineWorkItem workItem;
     for(int i=0; i<REFINE_MAX_TASKS; i++) {
         m_idleTaskIds.push(i);
+        writeEncodedVecToBuffer(i, m_idleVec);
     }
     int running = 1;
     while(running) {
@@ -341,8 +345,8 @@ int CrefineThread::getTaskId() {
 
 void CrefineThread::addTask(RefineWorkItem &workItem) {
     workItem.status = REFINE_TASK_IN_PROGRESS;
-    int taskId = getTaskId();
-    m_taskMap[taskId] = workItem;
+    workItem.taskId = getTaskId();
+    m_taskMap[workItem.taskId] = workItem;
 }
 
 void CrefineThread::iterateRefineTasks() {
@@ -380,4 +384,25 @@ bool CrefineThread::isWaiting() {
     return m_workQueue.numWaiting() > 0;
 }
 
+void CrefineThread::setTaskBufferIdle(int taskId) {
+    writeEncodedVecToBuffer(taskId, m_idleVec);
+}
+
+void CrefineThread::writeParamsToBuffer(int taskId, CLPatchParams &patchParams) {
+    cl_int clErr;
+    clErr = clEnqueueWriteBuffer(m_clQueue, m_clPatchParams, false, taskId*sizeof(CLPatchParams), sizeof(CLPatchParams), &patchParams,
+            0, NULL, NULL);
+    if(clErr < 0) {
+        printf("error writing patchParams to buffer %d\n", taskId);
+    }
+}
+
+void CrefineThread::writeEncodedVecToBuffer(int taskId, cl_double4 &encodedVec) {
+    cl_int clErr;
+    clErr = clEnqueueWriteBuffer(m_clQueue, m_clEncodedVecs, false, taskId*sizeof(cl_double4), sizeof(cl_double4), &encodedVec,
+            0, NULL, NULL);
+    if(clErr < 0) {
+        printf("error writing encodedVec to buffer %d\n", taskId);
+    }
+}
 

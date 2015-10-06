@@ -239,14 +239,15 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
         __constant ImageParams *imageParams, /* 1 */
         __global PatchParams *patchParams, /* 2 */
         int level, /* 3 */
-        __global double3 *encodedVecs) /* 4 */
+        __global double4 *encodedVecs) /* 4 */
 {
     __local float refData[3*WSIZE*WSIZE];
     __local float imData[3*WSIZE*WSIZE];
     __local float localVal;
 
     __global PatchParams *myPatchParams = patchParams;
-    double3 patchVec = encodedVecs[0];
+    double4 encodedVec = encodedVecs[0];
+    double3 patchVec = (double3)(encodedVec.x, encodedVec.y, encodedVec.z);
 
     struct FArgs args;
     args.images = imageParams;
@@ -258,29 +259,28 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
 
     int maxSteps = 1000;
     double3 stepX = (double3)(.1,0,0);
-    double3 stepY = (double3)(0,.5,0);
-    double3 stepZ = (double3)(0,0,.5);
+    double3 stepY = (double3)(0,.75,0);
+    double3 stepZ = (double3)(0,0,.75);
     int cstep = 0;
     int nreduce = 0;
-    bool didStep = true;
+    bool didStep;
     float val = evalF(patchVec, images, &args);
-
-    while(cstep < maxSteps) {
-        float oldval = val;
-        didStep = true;
-        while(didStep) {
+    if(encodedVec.w >= 0) {
+        while(cstep < maxSteps) {
+            float oldval = val;
             didStep = false;
             patchVec = testStep(patchVec, stepX, images, &args, &val, &didStep);
             patchVec = testStep(patchVec, stepY, images, &args, &val, &didStep);
             patchVec = testStep(patchVec, stepZ, images, &args, &val, &didStep);
+            if(!didStep) {
+                stepX /= 4.;
+                stepY /= 4.;
+                stepZ /= 4.;
+                nreduce++;
+            }
             cstep++;
-            if(cstep >= maxSteps) break;
+            //if(nreduce > 3 && fabs(oldval-val) < .001f) break;
         }
-        stepX /= 2.;
-        stepY /= 2.;
-        stepZ /= 2.;
-        nreduce++;
-        if(nreduce > 3 && fabs(oldval-val) < .001f) break;
     }
     //float val = evalF(images, projections, center, ray, dscale,
     //    ascale, ipscales, indexes, xaxes, yaxes, zaxes,
@@ -289,7 +289,9 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
 
 
     if(get_local_id(0) == 0 && get_local_id(1) == 0) {
-        encodedVecs[0] = patchVec;
+        encodedVecs[0].x = patchVec.x;
+        encodedVecs[0].y = patchVec.y;
+        encodedVecs[0].z = patchVec.z;
     }
     barrier(CLK_GLOBAL_MEM_FENCE);
 }

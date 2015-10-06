@@ -291,7 +291,8 @@ int Cexpand::expandSub(const Ppatch& orgppatch, const int id,
   workItem.status = REFINE_TASK_INCOMPLETE;
   workItem.patch = ppatch;
   workItem.id = id;
-  m_fm.m_optim.setPatchParams(*ppatch, id, workItem.patchParams, workItem.encodedVec);
+  workItem.patchParams = PCLPatchParams(new CLPatchParams());
+  m_fm.m_optim.setPatchParams(*ppatch, id, *workItem.patchParams, workItem.encodedVec);
   m_refineThread.enqueueWorkItem(workItem);
 
   /*

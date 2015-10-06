@@ -4,6 +4,7 @@
 #include <vector>
 #include "patch.h"
 #include <gsl/gsl_multimin.h>
+#include <CL/cl_platform.h>
 
 namespace PMVS3 {
   
@@ -37,7 +38,7 @@ class Coptim {
   
   int preProcess(Patch::Cpatch& patch, const int id, const int seed);
   void setImageParams(int i, CLImageParams &imParams);
-  void setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, double *encodedVec);
+  void setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, cl_double4 &encodedVec);
   void refinePatch(Patch::Cpatch& patch, const int id, const int time);
   
   void refinePatchBFGS(Patch::Cpatch& patch, const int id, const int time);

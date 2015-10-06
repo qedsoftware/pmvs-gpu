@@ -6,8 +6,8 @@
 #include <map>
 #include "patch.h"
 #include <CL/cl.h>
-#include <CL/cl_platform.h>
 #include <sstream>
+#include <boost/shared_ptr.hpp>
 
 namespace PMVS3 {
     enum {REFINE_TASK_INCOMPLETE,
@@ -38,13 +38,16 @@ namespace PMVS3 {
         cl_int indexes[10];
     } CLPatchParams;
 
+    typedef boost::shared_ptr<CLPatchParams> PCLPatchParams;
+
     class RefineWorkItem {
         public:
             RefineWorkItem() : id(-1) {};
             Patch::Ppatch patch;
-            CLPatchParams patchParams;
-            double encodedVec[3];
+            PCLPatchParams patchParams;
+            cl_double4 encodedVec;
             int id;
+            int taskId;
             int status;
     };
 
@@ -89,6 +92,7 @@ namespace PMVS3 {
             cl_mem m_clImageParams;
             cl_mem m_clPatchParams;
             cl_mem m_clEncodedVecs;
+            cl_double4 m_idleVec;
 
             void initCL();
             static void rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out);
@@ -107,6 +111,9 @@ namespace PMVS3 {
             void stopPostProcessThreads();
             template <typename T1, typename T2>
             static void strSubstitute(std::string &str, T1 searchStrIn, T2 replaceIn, bool replaceAll = false);
+            void setTaskBufferIdle(int taskId);
+            void writeParamsToBuffer(int taskId, CLPatchParams &patchParams);
+            void writeEncodedVecToBuffer(int taskId, cl_double4 &encodedVec);
     };
 
     template <typename T1, typename T2>
