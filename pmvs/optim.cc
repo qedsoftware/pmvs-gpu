@@ -26,10 +26,6 @@ void Coptim::init(void) {
   m_dscalesT.resize(REFINE_MAX_TASKS);
   m_ascalesT.resize(REFINE_MAX_TASKS);
   m_paramsT.resize(REFINE_MAX_TASKS);
-  m_clQueuesT.resize(REFINE_MAX_TASKS);
-  m_clKernelsT.resize(REFINE_MAX_TASKS);
-  m_clPatchParamsT.resize(REFINE_MAX_TASKS);
-  m_clEncodedVecsT.resize(REFINE_MAX_TASKS);
   
   m_texsT.resize(REFINE_MAX_TASKS);
   m_weightsT.resize(REFINE_MAX_TASKS);
@@ -42,217 +38,6 @@ void Coptim::init(void) {
   }
   
   setAxesScales();
-  initCL();
-}
-
-void Coptim::axesToBuffer(cl_command_queue clQueue, std::vector<Vec3f> &axesVector, cl_mem &axesCLBuffer) {
-    // 3 component vectors are 4 component aligned
-    // see section 6.1.5 of OpenCL 1.2 spec
-    float axesBuffer[4*m_fm.m_num];
-    for(int i=0; i<m_fm.m_num; i++) {
-        for(int j=0; j<3; j++) {
-            axesBuffer[4*i+j] = axesVector[i][j];
-        }
-    }
-
-    cl_int clErr;
-    axesCLBuffer = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, 4*m_fm.m_num*sizeof(float), NULL, &clErr);
-    if(clErr < 0) {
-        printf("error creating axesBuffer %d\n", clErr);
-    }
-    clEnqueueWriteBuffer(clQueue, axesCLBuffer, CL_TRUE, 0, 4*m_fm.m_num*sizeof(float), axesBuffer, 0, NULL, NULL);
-}
-
-void Coptim::rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out) {
-    unsigned char *cin = in;
-    unsigned char *cout = out;
-    for(int i=0; i<height; i++) {
-        for(int j=0; j<width; j++) {
-            for(int k=0; k<3; k++) {
-                *cout = *cin;
-                cin++;
-                cout++;
-            }
-            *cout = 255;
-            cout++;
-        }
-    }
-}
-
-void Coptim::initCL() {
-    cl_uint numPlatforms, numDevices;
-    cl_int cl_err;
-    cl_platform_id platforms[1];
-    cl_device_id devices[1];
-    clGetPlatformIDs(1, platforms, &numPlatforms);
-    const cl_context_properties cl_props[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platforms[0], 0};
-    clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_GPU, 1, devices, &numDevices);
-    m_clCtx = clCreateContext(cl_props, 1, devices, NULL, NULL, &cl_err);
-    if(cl_err == CL_SUCCESS) {
-        printf("OpenCL context created successfully\n");
-    }
-    else {
-        printf("OpenCL error creating context %d\n", cl_err);
-    }
-    m_clDevice = devices[0];
-
-    std::ifstream t("/home/jkevin/src/OpenDroneMap/src/cmvs/program/base/pmvs/refinePatch.cl");
-    std::stringstream buffer;
-    buffer << t.rdbuf();
-    std::string pstr = buffer.str();
-    strSubstitute(pstr, "<WSIZE>", m_fm.m_wsize);
-    const char *pcstr = pstr.c_str();
-    size_t pstrlen = pstr.length();
-    cl_int clErr;
-    m_clProgram = clCreateProgramWithSource(m_clCtx, 1, &pcstr, &pstrlen, &clErr);
-    printf("%s\n", pcstr);
-    printf("created cl program %d\n", clErr);
-
-    clBuildProgram(m_clProgram, 1, &m_clDevice, NULL, NULL, NULL);
-    cl_build_status buildStatus;
-    clGetProgramBuildInfo(m_clProgram, m_clDevice,
-            CL_PROGRAM_BUILD_STATUS, sizeof(cl_build_status), 
-            &buildStatus, NULL);
-    if(buildStatus != CL_BUILD_SUCCESS) {
-        printf("error building program %d\n", buildStatus);
-        char *buildLog = (char *)malloc(50*1024);
-        clErr = clGetProgramBuildInfo(m_clProgram, m_clDevice,
-                CL_PROGRAM_BUILD_LOG, 50*1024, buildLog, NULL);
-        printf("got build info %d\n", clErr);
-        printf("%s\n", buildLog);
-        free(buildLog);
-        std::exit(0);
-    }
-    else {
-        printf("successfully built program\n");
-    }
-
-    cl_command_queue clQueue = clCreateCommandQueue(m_clCtx, m_clDevice, 0, &clErr);
-
-    initCLImageArray(clQueue);
-    initCLImageParams(clQueue);
-
-    clReleaseCommandQueue(clQueue);
-
-    for(int i=0; i<m_fm.m_CPU; i++) {
-        initCLThreadObjects(i);
-    }
-}
-
-void Coptim::initCLImageArray(cl_command_queue clQueue) {
-    cl_int clErr;
-    int maxWidth = 0;
-    int maxHeight = 0;
-    for(int i=0; i<m_fm.m_num; i++) {
-        int cwidth = m_fm.m_pss.m_photos[i].getWidth(m_fm.m_level);
-        int cheight = m_fm.m_pss.m_photos[i].getHeight(m_fm.m_level);
-        maxWidth = std::max(maxWidth, cwidth);
-        maxHeight = std::max(maxHeight, cheight);
-    }
-    cl_image_format imFormat = {CL_RGBA, CL_UNORM_INT8};
-    unsigned char *rgbaBuffer = (unsigned char *)malloc(maxWidth*maxHeight*4);
-    cl_image_desc imDesc = {
-        CL_MEM_OBJECT_IMAGE2D_ARRAY,
-        maxWidth, maxHeight, 1, m_fm.m_num,
-        0, 0, 0, 0, NULL};
-
-    m_clImageArray = clCreateImage(m_clCtx,
-            CL_MEM_READ_ONLY,
-            &imFormat,
-            &imDesc, 
-            NULL,
-            &clErr);
-    printf("created CL image array %x\n", clErr);
-
-    for(int i=0; i<m_fm.m_num; i++) {
-        int imWidth = m_fm.m_pss.m_photos[i].getWidth(m_fm.m_level);
-        int imHeight = m_fm.m_pss.m_photos[i].getHeight(m_fm.m_level);
-        // must convert to RGBA because nvidia doesn't support RGB
-        rgbToRGBA(imWidth, imHeight, m_fm.m_pss.m_photos[i].imData(m_fm.m_level), rgbaBuffer);
-        size_t origin[] = {0,0,i};
-        size_t region[] = {imWidth, imHeight, 1};
-        clEnqueueWriteImage(clQueue, m_clImageArray, CL_TRUE,
-                origin, region, 0, 0,
-                rgbaBuffer, NULL, 0, NULL);
-    }
-    free(rgbaBuffer);
-}
-
-void Coptim::initCLImageParams(cl_command_queue clQueue) {
-    cl_int clErr;
-
-    CLImageParams imParams[m_fm.m_num];
-
-    for(int i=0; i<m_fm.m_num; i++) {
-        for(int j=0; j<3; j++) {
-            for(int k=0; k<4; k++) {
-                imParams[i].projection[j].s[k] = m_fm.m_pss.m_photos[i].m_projection[m_fm.m_level][j][k];
-            }
-        }
-        for(int j=0; j<3; j++) {
-            imParams[i].xaxis.s[j] = m_xaxes[i][j];
-            imParams[i].yaxis.s[j] = m_yaxes[i][j];
-            imParams[i].zaxis.s[j] = m_zaxes[i][j];
-        }
-        for(int j=0; j<4; j++) {
-            imParams[i].center.s[j] = m_fm.m_pss.m_photos[i].m_center[j];
-        }
-        imParams[i].ipscale = m_ipscales[i];
-    }
-    m_clImageParams = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, m_fm.m_num*sizeof(CLImageParams), NULL, &clErr);
-    if(clErr < 0) {
-        printf("error creating ImageParams buffer %d\n", clErr);
-    }
-    clEnqueueWriteBuffer(clQueue, m_clImageParams, CL_TRUE, 0, m_fm.m_num*sizeof(CLImageParams), imParams, 0, NULL, NULL);
-}
-
-void Coptim::initCLThreadObjects(int id) {
-  cl_int clErr;
-
-  m_clQueuesT[id] = clCreateCommandQueue(m_clCtx, m_clDevice, 0, &clErr);
-  if(clErr < 0) {
-      printf("couldn't create command queue %d\n", clErr);
-  }
-
-  m_clKernelsT[id] = clCreateKernel(m_clProgram, "refinePatch", &clErr);
-  if(clErr < 0) {
-      printf("error creating opencl kernel %d\n", clErr);
-  }
-
-  // set kernel args that don't change
-  clErr = clSetKernelArg(m_clKernelsT[id], 0, sizeof(cl_mem), &m_clImageArray);
-  if(clErr < 0) {
-      printf("error setKernelArg 0 %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 1, sizeof(cl_mem), &m_clImageParams);
-  if(clErr < 0) {
-      printf("error setKernelArg 1 %d\n", clErr);
-  }
-
-  m_clPatchParamsT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, sizeof(CLPatchParams), NULL, &clErr);
-  if(clErr < 0) {
-      printf("error createBuffer PatchParams %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 2, sizeof(cl_mem), &m_clPatchParamsT[id]);
-  if(clErr < 0) {
-      printf("error setKernelArg 2 %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 3, sizeof(int), &m_fm.m_level);
-  if(clErr < 0) {
-      printf("error setKernelArg 3 %d\n", clErr);
-  }
-
-  m_clEncodedVecsT[id] = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, sizeof(cl_double3), NULL, &clErr);
-  if(clErr < 0) {
-      printf("error createBuffer EncodedVecs %d\n", clErr);
-  }
-  clErr = clSetKernelArg(m_clKernelsT[id], 4, sizeof(cl_mem), &m_clEncodedVecsT[id]);
-  if(clErr < 0) {
-      printf("error setKernelArg 4 %d\n", clErr);
-  }
-}
-
-void Coptim::destroyCL() {
 }
 
 void Coptim::setAxesScales(void) {
@@ -726,6 +511,65 @@ void Coptim::computeUnits(const Patch::Cpatch& patch,
     rays.push_back(ray);    
     ++bimage;
   }
+}
+
+void Coptim::setImageParams(int i, CLImageParams &imParams) {
+    for(int j=0; j<3; j++) {
+        for(int k=0; k<4; k++) {
+            imParams.projection[j].s[k] = m_fm.m_pss.m_photos[i].m_projection[m_fm.m_level][j][k];
+        }
+    }
+    for(int j=0; j<3; j++) {
+        imParams.xaxis.s[j] = m_xaxes[i][j];
+        imParams.yaxis.s[j] = m_yaxes[i][j];
+        imParams.zaxis.s[j] = m_zaxes[i][j];
+    }
+    for(int j=0; j<4; j++) {
+        imParams.center.s[j] = m_fm.m_pss.m_photos[i].m_center[j];
+    }
+    imParams.ipscale = m_ipscales[i];
+}
+
+void Coptim::setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, double *encodedVec) {
+  m_indexesT[id] = patch.m_images;
+  const int size = min(m_fm.m_tau, (int)m_indexesT[id].size());
+  
+  float ascale = M_PI / 48.0f;//patch.m_ascale;
+
+  m_centersT[id] = patch.m_coord;
+  m_raysT[id] = patch.m_coord -
+    m_fm.m_pss.m_photos[patch.m_images[0]].m_center;
+  unitize(m_raysT[id]);
+  float rayVec[4];
+  for(int i=0; i<4; i++) rayVec[i] = m_raysT[id][i];
+  float centerVec[4];
+  for(int i=0; i<4; i++) centerVec[i] = m_centersT[id][i];
+  
+  m_dscalesT[id] = patch.m_dscale;
+  m_ascalesT[id] = M_PI / 48.0f;//patch.m_ascale;
+  
+  computeUnits(patch, m_weightsT[id]);
+  for (int i = 1; i < (int)m_weightsT[id].size(); ++i)
+    m_weightsT[id][i] = min(1.0f, m_weightsT[id][0] / m_weightsT[id][i]);  
+  m_weightsT[id][0] = 1.0f;
+  
+  encode(patch.m_coord, patch.m_normal, encodedVec, id);
+
+  for(int i=0; i<m_indexesT[id].size(); i++) {
+      patchParams.indexes[i] = m_indexesT[id][i];
+  }
+  if(m_indexesT[id].size() == 0) printf("empty indexes\n");
+  //for(int i=0; i<m_indexesT[id].size(); i++) {
+  //    if(m_indexesT[id][i] > 7) printf("invalid index %d\n", m_indexesT[id][i]);
+  //}
+
+  for(int i=0; i<4; i++) {
+      patchParams.center.s[i] = centerVec[i];
+      patchParams.ray.s[i] = rayVec[i];
+  }
+  patchParams.dscale = patch.m_dscale;
+  patchParams.ascale = ascale;
+  patchParams.nIndexes = size;
 }
 
 void Coptim::refinePatch(Cpatch& patch, const int id,
@@ -1281,14 +1125,14 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
     //status = gsl_multimin_test_size (size, 1e-2);
     status = gsl_multimin_test_size (size, 1e-3);
   } while (status == GSL_CONTINUE && iter < time);
-  //printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+  printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
   p[0] = gsl_vector_get(s->x, 0);
   p[1] = gsl_vector_get(s->x, 1);
   p[2] = gsl_vector_get(s->x, 2);
   
   if (status == GSL_SUCCESS) {
     decode(patch.m_coord, patch.m_normal, p, id);
-    //printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+    printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
     
     patch.m_ncc = 1.0 -
       unrobustincc(computeINCC(patch.m_coord,
@@ -1302,122 +1146,6 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
   gsl_multimin_fminimizer_free (s);
   gsl_vector_free (x);
   gsl_vector_free (ss);
-}
-
-void Coptim::refinePatchGPU(Cpatch& patch, const int id,
-                             const int time) {
-  int status;
-  cl_int clErr;
-  
-  m_indexesT[id] = patch.m_images;
-  const int size = min(m_fm.m_tau, (int)m_indexesT[id].size());
-  
-  float ascale = M_PI / 48.0f;//patch.m_ascale;
-
-  m_centersT[id] = patch.m_coord;
-  m_raysT[id] = patch.m_coord -
-    m_fm.m_pss.m_photos[patch.m_images[0]].m_center;
-  unitize(m_raysT[id]);
-  float rayVec[4];
-  for(int i=0; i<4; i++) rayVec[i] = m_raysT[id][i];
-  float centerVec[4];
-  for(int i=0; i<4; i++) centerVec[i] = m_centersT[id][i];
-  
-  m_dscalesT[id] = patch.m_dscale;
-  m_ascalesT[id] = M_PI / 48.0f;//patch.m_ascale;
-  
-  computeUnits(patch, m_weightsT[id]);
-  for (int i = 1; i < (int)m_weightsT[id].size(); ++i)
-    m_weightsT[id][i] = min(1.0f, m_weightsT[id][0] / m_weightsT[id][i]);  
-  m_weightsT[id][0] = 1.0f;
-  
-  double p[3];
-  encode(patch.m_coord, patch.m_normal, p, id);
-
-  cl_kernel refineKernel = m_clKernelsT[id];
-  CLPatchParams patchParams;
-
-  for(int i=0; i<m_indexesT[id].size(); i++) {
-      patchParams.indexes[i] = m_indexesT[id][i];
-  }
-  if(m_indexesT[id].size() == 0) printf("empty indexes\n");
-  //for(int i=0; i<m_indexesT[id].size(); i++) {
-  //    if(m_indexesT[id][i] > 7) printf("invalid index %d\n", m_indexesT[id][i]);
-  //}
-
-  for(int i=0; i<4; i++) {
-      patchParams.center.s[i] = centerVec[i];
-      patchParams.ray.s[i] = rayVec[i];
-  }
-  patchParams.dscale = patch.m_dscale;
-  patchParams.ascale = ascale;
-  patchParams.nIndexes = size;
-
-  clEnqueueWriteBuffer(m_clQueuesT[id], m_clPatchParamsT[id], CL_FALSE, 0, sizeof(patchParams), &patchParams,
-          0, NULL, NULL);
-  clEnqueueWriteBuffer(m_clQueuesT[id], m_clEncodedVecsT[id], CL_FALSE, 0, 3*sizeof(double), p,
-          0, NULL, NULL);
-
-  // call GPU min`and store result to p
-  // return status messages similar to GSL
-  //
-  
-  /*
-  Vec4f coord, normal;
-  decode(coord, normal, p, id);
-  Vec4f pxaxis, pyaxis;
-  const int index = m_one->m_indexesT[id][0];
-  m_one->getPAxes(index, coord, normal, pxaxis, pyaxis);
-  const float pscale = getUnit(index, coord);
-  int flag = grabTex(coord, pxaxis, pyaxis, normal, index,
-                          m_fm.m_wsize, m_texsT[id][0]);
-  float fz = norm(coord - m_fm.m_pss.m_photos[index].m_center);
-  gsl_vector* x = gsl_vector_alloc (3);
-  gsl_vector_set(x, 0, p[0]);
-  gsl_vector_set(x, 1, p[1]);
-  gsl_vector_set(x, 2, p[2]);
-  int id2 = id;
-  double r = my_f(x, &id2);
-
-  printf("my_f val %d %f\n", id, (float)r);
-  */
-
-  //clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
-  //clErr = clEnqueueTask(m_clQueuesT[id], refineKernel, 0, NULL, NULL);
-  size_t globalWorkOffset[2] = {0,0};
-  size_t globalWorkSize[2] = {m_fm.m_wsize,m_fm.m_wsize};
-  size_t localWorkSize[2] = {m_fm.m_wsize, m_fm.m_wsize};
-  //size_t globalWorkSize[2] = {1,1};
-  //size_t localWorkSize[2] = {1,1};
-  clErr = clEnqueueNDRangeKernel(m_clQueuesT[id], refineKernel, 2, 
-          globalWorkOffset, globalWorkSize, localWorkSize,
-          0, NULL, NULL);
-  if(clErr < 0) {
-      printf("error launching kernel %d\n", clErr);
-  }
-  for(int i=0; i<3; i++) {p[i] = 1000;}
-  clErr = clEnqueueReadBuffer(m_clQueuesT[id], m_clEncodedVecsT[id], CL_TRUE, 0, 3*sizeof(double), p, 0, NULL, NULL);
-
-
-  printf("buffer val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
-  //printf("patch cent %d %f\n", id, m_texsT[id][0][10]);
-  
-  
-  /*
-  status = GSL_SUCCESS;
-
-  if (status == GSL_SUCCESS) {
-    decode(patch.m_coord, patch.m_normal, p, id);
-    
-    patch.m_ncc = 1.0 -
-      unrobustincc(computeINCC(patch.m_coord,
-                               patch.m_normal, patch.m_images, id, 1));
-  }
-  else
-    patch.m_images.clear();   
-  
-  ++m_status[status + 2];
-  */
 }
 
 void Coptim::encode(const Vec4f& coord,

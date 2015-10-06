@@ -2,46 +2,18 @@
 #define PMVS3_OPTIM_H
 
 #include <vector>
-#include <sstream>
 #include "patch.h"
 #include <gsl/gsl_multimin.h>
-#include <CL/cl.h>
-#include <CL/cl_platform.h>
 
 namespace PMVS3 {
   
 class CfindMatch;
-
-typedef struct _CLImageParams {
-    cl_float4 projection[3];
-    cl_float3 xaxis;
-    cl_float3 yaxis;
-    cl_float3 zaxis;
-    cl_float4 center;
-    cl_float ipscale;
-} CLImageParams;
-
-typedef struct _CLPatchParams {
-    cl_float4 center;
-    cl_float4 ray;
-    cl_float dscale;
-    cl_float ascale;
-    cl_int nIndexes;
-    cl_int indexes[10];
-} CLPatchParams;
 
 class Coptim {
  public:
   Coptim(CfindMatch& findMatch);
 
   void init(void);
-  void axesToBuffer(cl_command_queue clQueue, std::vector<Vec3f> &axesVector, cl_mem &axesBuffers);
-  static void rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out);
-  void initCL();
-  void initCLImageArray(cl_command_queue clQueue);
-  void initCLImageParams(cl_command_queue clQueue);
-  void initCLThreadObjects(int id);
-  void destroyCL();
 
   //-----------------------------------------------------------------
   // Image manipulation
@@ -64,12 +36,13 @@ class Coptim {
   //-----------------------------------------------------------------
   
   int preProcess(Patch::Cpatch& patch, const int id, const int seed);
+  void setImageParams(int i, CLImageParams &imParams);
+  void setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, double *encodedVec);
   void refinePatch(Patch::Cpatch& patch, const int id, const int time);
   
   void refinePatchBFGS(Patch::Cpatch& patch, const int id, const int time);
   void refinePatchBFGS(Patch::Cpatch& patch, const int id, const int time,
                        const int ncc);
-  void refinePatchGPU(Patch::Cpatch& patch, const int id, const int time);
   void refineDepthBFGS(Patch::Cpatch& patch, const int id, const int time,
                        const int ncc);
   
@@ -192,8 +165,6 @@ class Coptim {
  protected:
   
   void setAxesScales(void);
-  template <typename T1, typename T2>
-  static void strSubstitute(std::string &str, T1 searchStrIn, T2 replaceIn, bool replaceAll = false);
   static Coptim* m_one;  
   CfindMatch& m_fm;
 
@@ -213,24 +184,6 @@ class Coptim {
   std::vector<float> m_dscalesT;
   std::vector<float> m_ascalesT;
 
-  //-----------------------------------------------------------------
-  // OpenCL
-  cl_context m_clCtx;
-  cl_device_id m_clDevice;
-  cl_program m_clProgram;
-
-  // CL image array
-  cl_mem m_clImageArray;
-
-  // CL params
-  cl_mem m_clImageParams;
-
-  // per thread (temporarily)
-  std::vector<cl_mem> m_clPatchParamsT;
-  std::vector<cl_mem> m_clEncodedVecsT;
-  std::vector<cl_command_queue> m_clQueuesT;
-  std::vector<cl_kernel> m_clKernelsT;
-
   // stores current parameters for derivative computation
   std::vector<Vec3f> m_paramsT;
   
@@ -242,27 +195,6 @@ class Coptim {
   std::vector<std::vector<double> > m_worksT;
   
 };
-
-template <typename T1, typename T2>
-void Coptim::strSubstitute(std::string &str, T1 searchStrIn, T2 replaceIn, bool replaceAll) {
-    size_t startPos;
-    std::string searchStr(searchStrIn);
-    std::stringstream ss;
-
-    ss << replaceIn;
-
-    startPos = str.find(searchStr);
-    while(startPos != std::string::npos) {
-        str.replace(startPos, searchStr.length(), ss.str());
-        if(replaceAll) {
-            startPos = str.find(searchStr);
-        }
-        else {
-            startPos = std::string::npos;
-        }
-    }
 }
-  
-};
 
 #endif // PMVS3_OPTIM_H

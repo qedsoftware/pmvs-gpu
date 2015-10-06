@@ -1,11 +1,13 @@
 #ifndef PMVS3_REFINE_THREAD_H
 #define PMVS3_REFINE_THREAD_H
 
+#include "asyncQueue.h"
 #include <pthread.h>
 #include <map>
 #include "patch.h"
-#include "optim.h"
-#include "asyncQueue.h"
+#include <CL/cl.h>
+#include <CL/cl_platform.h>
+#include <sstream>
 
 namespace PMVS3 {
     enum {REFINE_TASK_INCOMPLETE,
@@ -18,23 +20,47 @@ namespace PMVS3 {
 #define REFINE_MAX_TASKS 1024
 #define REFINE_QUEUE_LENGTH 2048
 
+    typedef struct _CLImageParams {
+        cl_float4 projection[3];
+        cl_float3 xaxis;
+        cl_float3 yaxis;
+        cl_float3 zaxis;
+        cl_float4 center;
+        cl_float ipscale;
+    } CLImageParams;
+
+    typedef struct _CLPatchParams {
+        cl_float4 center;
+        cl_float4 ray;
+        cl_float dscale;
+        cl_float ascale;
+        cl_int nIndexes;
+        cl_int indexes[10];
+    } CLPatchParams;
+
     class RefineWorkItem {
         public:
             RefineWorkItem() : id(-1) {};
             Patch::Ppatch patch;
+            CLPatchParams patchParams;
+            double encodedVec[3];
             int id;
             int status;
     };
 
+    class CfindMatch;
+    class Coptim;
+
     class CrefineThread {
         public:
-            CrefineThread(int numPostProcessThreads, CasyncQueue<RefineWorkItem> &postProcessQueue, Coptim &optim);
+            CrefineThread(int numPostProcessThreads, CasyncQueue<RefineWorkItem> &postProcessQueue, CfindMatch &findMatch);
             ~CrefineThread();
+            void init();
             void enqueueWorkItem(RefineWorkItem &workItem);
             void clearWorkItems();
             bool isWaiting();
 
-        private:
+        protected:
             CasyncQueue<RefineWorkItem> m_workQueue;
             std::queue<int> m_idleTaskIds;
             std::map<int, RefineWorkItem> m_taskMap;
@@ -43,8 +69,34 @@ namespace PMVS3 {
             pthread_mutex_t m_workTaskIdLock;
             CasyncQueue<RefineWorkItem> &m_postProcessQueue;
             Coptim &m_optim;
+            CfindMatch& m_fm;
             int m_numPostProcessThreads;
             int m_numTasks;
+            bool m_initialized;
+
+            //-----------------------------------------------------------------
+            // OpenCL
+            cl_context m_clCtx;
+            cl_device_id m_clDevice;
+            cl_program m_clProgram;
+            cl_kernel m_clKernel;
+            cl_command_queue m_clQueue;
+
+            // CL image array
+            cl_mem m_clImageArray;
+
+            // CL params
+            cl_mem m_clImageParams;
+            cl_mem m_clPatchParams;
+            cl_mem m_clEncodedVecs;
+
+            void initCL();
+            static void rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out);
+            void initCLImageArray();
+            void initCLImageParams();
+            void initCLPatchParams();
+            void destroyCL();
+            void refinePatchGPU(RefineWorkItem &workItem);
 
             static void *threadLoopTmp(void *args);
             void threadLoop();
@@ -53,6 +105,29 @@ namespace PMVS3 {
             void iterateRefineTasks();
             void checkCompletedTasks();
             void stopPostProcessThreads();
+            template <typename T1, typename T2>
+            static void strSubstitute(std::string &str, T1 searchStrIn, T2 replaceIn, bool replaceAll = false);
     };
+
+    template <typename T1, typename T2>
+    void CrefineThread::strSubstitute(std::string &str, T1 searchStrIn, T2 replaceIn, bool replaceAll) {
+        size_t startPos;
+        std::string searchStr(searchStrIn);
+        std::stringstream ss;
+
+        ss << replaceIn;
+
+        startPos = str.find(searchStr);
+        while(startPos != std::string::npos) {
+            str.replace(startPos, searchStr.length(), ss.str());
+            if(replaceAll) {
+                startPos = str.find(searchStr);
+            }
+            else {
+                startPos = std::string::npos;
+            }
+        }
+    }
+  
 }
 #endif

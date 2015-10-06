@@ -91,6 +91,7 @@ void CfindMatch::init(const Soption& option) {
   m_expand.init();
   m_filter.init();
   m_optim.init();
+
   //----------------------------------------------------------------------
   // Init thresholds
   m_angleThreshold0 = 60.0f * M_PI / 180.0f;

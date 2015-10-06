@@ -12,7 +12,7 @@ using namespace Patch;
 Cexpand::Cexpand(CfindMatch& findMatch) : m_fm(findMatch),
     m_idQueue(-1),
     m_postProcessQueue(-1),
-    m_refineThread(m_fm.m_CPU, m_postProcessQueue, m_fm.m_optim)
+    m_refineThread(m_fm.m_CPU, m_postProcessQueue, m_fm)
 {
   pthread_cond_init(&m_emptyCondition, NULL);
   pthread_mutex_init(&m_queueLock, NULL);
@@ -27,6 +27,7 @@ void Cexpand::init(void) {
 }
 
 void Cexpand::run(void) {
+  m_refineThread.init();
   m_fm.m_count = 0;
   m_fm.m_jobs.clear();
   m_ecounts.resize(REFINE_MAX_TASKS);
@@ -290,6 +291,7 @@ int Cexpand::expandSub(const Ppatch& orgppatch, const int id,
   workItem.status = REFINE_TASK_INCOMPLETE;
   workItem.patch = ppatch;
   workItem.id = id;
+  m_fm.m_optim.setPatchParams(*ppatch, id, workItem.patchParams, workItem.encodedVec);
   m_refineThread.enqueueWorkItem(workItem);
 
   /*
