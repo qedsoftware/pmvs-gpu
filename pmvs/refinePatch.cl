@@ -263,7 +263,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     args.imData = imData;
     args.localVal = &localVal;
 
-    int maxSteps = 50;
+    int maxSteps = 5;
     double3 stepX = (double3)(.1,0,0);
     double3 stepY = (double3)(0,.75,0);
     double3 stepZ = (double3)(0,0,.75);

@@ -331,7 +331,7 @@ void CrefineThread::iterateRefineTasks() {
             //refinePatchGPU(*(iter->second.patch), iter->second.id, 100);
             iter->second.numIterations++;
             cl_double4 buff = m_encodedVecs[iter->second.taskId];
-            if(buff.w < .001 || iter->second.numIterations >= 20) {
+            if(buff.w < .001 || iter->second.numIterations >= 200) {
                 iter->second.encodedVec = buff;
                 //m_optim.finishRefine(*(iter->second.patch), iter->second.id, buff, REFINE_SUCCESS);
                 //printf("buffer val %lf %lf %lf %lf\n", buff.x, buff.y, buff.z, buff.w);
