@@ -14,10 +14,11 @@ namespace PMVS3 {
         REFINE_TASK_IN_PROGRESS,
         REFINE_TASK_COMPLETE,
         REFINE_ALL_TASKS_COMPLETE,
-        REFINE_TASK_IGNORE
+        REFINE_TASK_IGNORE,
+        REFINE_SUCCESS
     };
 
-#define REFINE_MAX_TASKS 256
+#define REFINE_MAX_TASKS 64
 #define REFINE_QUEUE_LENGTH 2048
 
     typedef struct _CLImageParams {
@@ -49,6 +50,7 @@ namespace PMVS3 {
             int id;
             int taskId;
             int status;
+            int numIterations;
     };
 
     class CfindMatch;

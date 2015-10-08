@@ -64,7 +64,7 @@ void CrefineThread::initCL() {
     size_t pstrlen = pstr.length();
     cl_int clErr;
     m_clProgram = clCreateProgramWithSource(m_clCtx, 1, &pcstr, &pstrlen, &clErr);
-    printf("%s\n", pcstr);
+    //printf("%s\n", pcstr);
     printf("created cl program %d\n", clErr);
 
     clBuildProgram(m_clProgram, 1, &m_clDevice, NULL, NULL, NULL);
@@ -329,10 +329,15 @@ void CrefineThread::iterateRefineTasks() {
     for(iter = m_taskMap.begin(); iter != m_taskMap.end(); iter++) {
         if(iter->second.status == REFINE_TASK_IN_PROGRESS) {
             //refinePatchGPU(*(iter->second.patch), iter->second.id, 100);
+            iter->second.numIterations++;
             cl_double4 buff = m_encodedVecs[iter->second.taskId];
-            printf("buffer val %lf %lf %lf %lf\n", buff.x, buff.y, buff.z, buff.w);
-            m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
-            iter->second.status = REFINE_TASK_COMPLETE;
+            if(buff.w < .001 || iter->second.numIterations >= 20) {
+                iter->second.encodedVec = buff;
+                //m_optim.finishRefine(*(iter->second.patch), iter->second.id, buff, REFINE_SUCCESS);
+                //printf("buffer val %lf %lf %lf %lf\n", buff.x, buff.y, buff.z, buff.w);
+                //m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
+                iter->second.status = REFINE_TASK_COMPLETE;
+            }
         }
     }
 }

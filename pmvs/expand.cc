@@ -292,6 +292,7 @@ int Cexpand::expandSub(const Ppatch& orgppatch, const int id,
   workItem.patch = ppatch;
   workItem.id = id;
   workItem.patchParams = PCLPatchParams(new CLPatchParams());
+  workItem.numIterations = 0;
   m_fm.m_optim.setPatchParams(*ppatch, id, *workItem.patchParams, workItem.encodedVec);
   m_refineThread.enqueueWorkItem(workItem);
 
@@ -318,6 +319,7 @@ void Cexpand::postProcessThread(void) {
             break;
         }
         else {
+            m_fm.m_optim.finishRefine(*(workItem.patch), workItem.id, workItem.encodedVec, REFINE_SUCCESS);
             int status = postProcessSub(workItem.patch, workItem.id);
             if(status == 1) {
                 pthread_mutex_lock(&m_queueLock);

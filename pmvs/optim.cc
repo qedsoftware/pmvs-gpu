@@ -1126,14 +1126,14 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
     //status = gsl_multimin_test_size (size, 1e-2);
     status = gsl_multimin_test_size (size, 1e-3);
   } while (status == GSL_CONTINUE && iter < time);
-  printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+  //printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
   p[0] = gsl_vector_get(s->x, 0);
   p[1] = gsl_vector_get(s->x, 1);
   p[2] = gsl_vector_get(s->x, 2);
   
   if (status == GSL_SUCCESS) {
     decode(patch.m_coord, patch.m_normal, p, id);
-    printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+    //printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
     
     patch.m_ncc = 1.0 -
       unrobustincc(computeINCC(patch.m_coord,
@@ -1147,6 +1147,18 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
   gsl_multimin_fminimizer_free (s);
   gsl_vector_free (x);
   gsl_vector_free (ss);
+}
+
+void Coptim::finishRefine(Cpatch &patch, int id, cl_double4 encodedVec, int status) {
+    if(status == REFINE_SUCCESS) {
+        decode(patch.m_coord, patch.m_normal, encodedVec.s, id);
+        patch.m_ncc = 1.0 -
+          unrobustincc(computeINCC(patch.m_coord,
+                                   patch.m_normal, patch.m_images, id, 1));
+    }
+    else {
+        patch.m_images.clear();   
+    }
 }
 
 void Coptim::encode(const Vec4f& coord,

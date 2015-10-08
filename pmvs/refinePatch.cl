@@ -214,18 +214,23 @@ float evalF(double3 patchVec,
     return *(args->localVal);
 }
 
-double3 testStep(double3 patchVec, double3 step, __read_only image2d_array_t images, struct FArgs *args, float *val, bool *didStep) {
+double3 testStep(double3 patchVec, double3 step, __read_only image2d_array_t images, struct FArgs *args, 
+        float *val, bool *didStep, float *maxDiff) {
     size_t localX = get_local_id(0);
     size_t localY = get_local_id(1);
     double3 test1 = patchVec+step;
     double3 test2 = patchVec-step;
     float newval = evalF(test1, images, args);
+    float diff = fabs(newval-*val);
+    if(diff > *maxDiff) *maxDiff = diff;
     if(newval < *val) {
         patchVec = test1;
         *val = newval;
         *didStep = true;
     }
     newval = evalF(test2, images, args);
+    diff = fabs(newval-*val);
+    if(diff > *maxDiff) *maxDiff = diff;
     if(newval < *val) {
         patchVec = test2;
         *val = newval;
@@ -258,7 +263,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     args.imData = imData;
     args.localVal = &localVal;
 
-    int maxSteps = 1000;
+    int maxSteps = 50;
     double3 stepX = (double3)(.1,0,0);
     double3 stepY = (double3)(0,.75,0);
     double3 stepZ = (double3)(0,0,.75);
@@ -268,11 +273,12 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     float val = evalF(patchVec, images, &args);
     if(encodedVec.w >= 0) {
         while(cstep < maxSteps) {
+            float maxDiff = 0;
             float oldval = val;
             didStep = false;
-            patchVec = testStep(patchVec, stepX, images, &args, &val, &didStep);
-            patchVec = testStep(patchVec, stepY, images, &args, &val, &didStep);
-            patchVec = testStep(patchVec, stepZ, images, &args, &val, &didStep);
+            patchVec = testStep(patchVec, stepX, images, &args, &val, &didStep, &maxDiff);
+            patchVec = testStep(patchVec, stepY, images, &args, &val, &didStep, &maxDiff);
+            patchVec = testStep(patchVec, stepZ, images, &args, &val, &didStep, &maxDiff);
             if(!didStep) {
                 stepX /= 4.;
                 stepY /= 4.;
@@ -281,6 +287,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
             }
             cstep++;
             //if(nreduce > 3 && fabs(oldval-val) < .001f) break;
+            encodedVec.w = maxDiff;
         }
     }
     //float val = evalF(images, projections, center, ray, dscale,
@@ -292,6 +299,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
         encodedVecs[groupId].x = patchVec.x;
         encodedVecs[groupId].y = patchVec.y;
         encodedVecs[groupId].z = patchVec.z;
+        encodedVecs[groupId].w = encodedVec.w;
     }
     barrier(CLK_GLOBAL_MEM_FENCE);
 }
