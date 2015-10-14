@@ -530,7 +530,7 @@ void Coptim::setImageParams(int i, CLImageParams &imParams) {
     imParams.ipscale = m_ipscales[i];
 }
 
-void Coptim::setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, cl_double4 &encodedVec) {
+void Coptim::setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, cl_float4 &encodedVec) {
   m_indexesT[id] = patch.m_images;
   const int size = min(m_fm.m_tau, (int)m_indexesT[id].size());
   
@@ -553,7 +553,11 @@ void Coptim::setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchPa
     m_weightsT[id][i] = min(1.0f, m_weightsT[id][0] / m_weightsT[id][i]);  
   m_weightsT[id][0] = 1.0f;
   
-  encode(patch.m_coord, patch.m_normal, encodedVec.s, id);
+  double p[3];
+  encode(patch.m_coord, patch.m_normal, p, id);
+  for(int i=0; i<3; i++) {
+      encodedVec.s[i] = (float)p[i];
+  }
   encodedVec.s[3] = 1;
 
   for(int i=0; i<m_indexesT[id].size(); i++) {
@@ -1126,13 +1130,13 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
     //status = gsl_multimin_test_size (size, 1e-2);
     status = gsl_multimin_test_size (size, 1e-3);
   } while (status == GSL_CONTINUE && iter < time);
-  printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+  //printf("init val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
   p[0] = gsl_vector_get(s->x, 0);
   p[1] = gsl_vector_get(s->x, 1);
   p[2] = gsl_vector_get(s->x, 2);
   
   if (status == GSL_SUCCESS) {
-    printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
+    //printf("refined val %d %lf %lf %lf\n", id, p[0], p[1], p[2]);
     decode(patch.m_coord, patch.m_normal, p, id);
     
     patch.m_ncc = 1.0 -
@@ -1149,9 +1153,13 @@ void Coptim::refinePatchBFGS(Cpatch& patch, const int id,
   gsl_vector_free (ss);
 }
 
-void Coptim::finishRefine(Cpatch &patch, int id, cl_double4 encodedVec, int status) {
+void Coptim::finishRefine(Cpatch &patch, int id, cl_float4 encodedVec, int status) {
     if(status == REFINE_SUCCESS) {
-        decode(patch.m_coord, patch.m_normal, encodedVec.s, id);
+        double p[3];
+        for(int i=0; i<3; i++) {
+            p[i] = encodedVec.s[i];
+        }
+        decode(patch.m_coord, patch.m_normal, p, id);
         patch.m_ncc = 1.0 -
           unrobustincc(computeINCC(patch.m_coord,
                                    patch.m_normal, patch.m_images, id, 1));

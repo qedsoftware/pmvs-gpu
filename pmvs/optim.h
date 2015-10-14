@@ -38,7 +38,7 @@ class Coptim {
   
   int preProcess(Patch::Cpatch& patch, const int id, const int seed);
   void setImageParams(int i, CLImageParams &imParams);
-  void setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, cl_double4 &encodedVec);
+  void setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchParams, cl_float4 &encodedVec);
   void refinePatch(Patch::Cpatch& patch, const int id, const int time);
   
   void refinePatchBFGS(Patch::Cpatch& patch, const int id, const int time);
@@ -46,7 +46,7 @@ class Coptim {
                        const int ncc);
   void refineDepthBFGS(Patch::Cpatch& patch, const int id, const int time,
                        const int ncc);
-  void finishRefine(Patch::Cpatch &patch, int id, cl_double4 encodedVec, int status);
+  void finishRefine(Patch::Cpatch &patch, int id, cl_float4 encodedVec, int status);
   
   int postProcess(Patch::Cpatch& patch, const int id, const int seed);
 

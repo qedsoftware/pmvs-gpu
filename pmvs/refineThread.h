@@ -18,7 +18,7 @@ namespace PMVS3 {
         REFINE_SUCCESS
     };
 
-#define REFINE_MAX_TASKS 16
+#define REFINE_MAX_TASKS 128
 #define REFINE_QUEUE_LENGTH 2048
 
     typedef struct _CLImageParams {
@@ -46,7 +46,7 @@ namespace PMVS3 {
             RefineWorkItem() : id(-1) {};
             Patch::Ppatch patch;
             PCLPatchParams patchParams;
-            cl_double4 encodedVec;
+            cl_float4 encodedVec;
             int id;
             int taskId;
             int status;
@@ -96,8 +96,8 @@ namespace PMVS3 {
             cl_mem m_clEncodedVecs;
             cl_mem m_clSimplexVecs;
             cl_mem m_clSimplexStates;
-            cl_double4 m_idleVec;
-            cl_double4 *m_encodedVecs;
+            cl_float4 m_idleVec;
+            cl_float4 *m_encodedVecs;
             cl_int *m_simplexStates;
             cl_int m_simplexStateInitAll;
 
@@ -120,7 +120,7 @@ namespace PMVS3 {
             static void strSubstitute(std::string &str, T1 searchStrIn, T2 replaceIn, bool replaceAll = false);
             void setTaskBufferIdle(int taskId);
             void writeParamsToBuffer(int taskId, CLPatchParams &patchParams);
-            void writeEncodedVecToBuffer(int taskId, cl_double4 &encodedVec);
+            void writeEncodedVecToBuffer(int taskId, cl_float4 &encodedVec);
             void writeSimplexStatesToBuffer();
             void initializeSimplexState(int taskId);
             void initializeAllSimplexStates();
