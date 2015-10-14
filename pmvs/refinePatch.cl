@@ -1,6 +1,15 @@
 #define WSIZE <WSIZE>
 const sampler_t imSampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
 
+enum {
+    SIMPLEX_STATE_INIT_ALL = 0,
+    SIMPLEX_STATE_INIT,
+    SIMPLEX_STATE_REFLECT,
+    SIMPLEX_STATE_EXPAND,
+    SIMPLEX_STATE_CONTRACT,
+    SIMPLEX_STATE_FAILED_CONTRACT
+};
+
 typedef struct _ImageParams {
     float4 projection[3];
     float3 xaxis;
@@ -239,15 +248,63 @@ double3 testStep(double3 patchVec, double3 step, __read_only image2d_array_t ima
     return patchVec;
 }
 
+void initSimplexVec(int i, __local double4 *simplexVecs, double3 vec) {
+    *((__local double3 *)(simplexVecs+i)) = vec;
+    simplexVecs[i].w = -1;
+}
+
+void setSimplexVec(int i, __local double4 *simplexVecs, double3 vec, float val) {
+    *((__local double3 *)(simplexVecs+i)) = vec;
+    simplexVecs[i].w = val;
+}
+
+double3 simplexReflect(float coeff, __local double4 *simplexVecs, int hi) {
+    double3 v = (double3)(0,0,0);
+    for(int i=0; i<4; i++) {
+        if(i==hi) continue;
+        v += as_double3(simplexVecs[i]);
+    }
+    v /= 3.;
+    v = v - coeff * (v - as_double3(simplexVecs[hi]));
+    return v;
+}
+
+void simplexMoveTowardsBest(__local double4 *simplexVecs, int lo) {
+    double3 vlo = as_double3(simplexVecs[lo]);
+    double3 v;
+    for(int i=0; i<4; i++) {
+        if(i==lo) continue;
+        v = (as_double3(simplexVecs[i]) + vlo) / 2.;
+        setSimplexVec(i, simplexVecs, v, -1);
+    }
+}
+
+float simplexFVariance(__local double4 *simplexVecs) {
+    double m=0;
+    for(int i=0; i<4; i++) {
+        m += simplexVecs[i].w;
+    }
+    m /= 4.;
+    double t=0;
+    for(int i=0; i<4; i++) {
+        t += pow(simplexVecs[i].w-m, 2);
+    }
+    return sqrt(t);
+}
+
 __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
         __constant ImageParams *imageParams, /* 1 */
         __global PatchParams *patchParams, /* 2 */
         int level, /* 3 */
-        __global double4 *encodedVecs) /* 4 */
+        __global double4 *encodedVecs, /* 4 */
+        __global double4 *simplexVecs, /* 5 */
+        __global int *simplexStates) /* 6 */
 {
     __local float refData[3*WSIZE*WSIZE];
     __local float imData[3*WSIZE*WSIZE];
     __local float localVal;
+    __local double3 testVecLocal;
+    __local double4 mySimplexVecs[4];
 
     size_t groupId = get_group_id(0);
 
@@ -267,39 +324,162 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     double3 stepX = (double3)(.1,0,0);
     double3 stepY = (double3)(0,.75,0);
     double3 stepZ = (double3)(0,0,.75);
-    int cstep = 0;
-    int nreduce = 0;
-    bool didStep;
-    float val = evalF(patchVec, images, &args);
-    if(encodedVec.w >= 0) {
-        while(cstep < maxSteps) {
-            float maxDiff = 0;
-            float oldval = val;
-            didStep = false;
-            patchVec = testStep(patchVec, stepX, images, &args, &val, &didStep, &maxDiff);
-            patchVec = testStep(patchVec, stepY, images, &args, &val, &didStep, &maxDiff);
-            patchVec = testStep(patchVec, stepZ, images, &args, &val, &didStep, &maxDiff);
-            if(!didStep) {
-                stepX /= 4.;
-                stepY /= 4.;
-                stepZ /= 4.;
-                nreduce++;
+
+    int state;
+    bool firstThread = (get_local_id(0) == 0 && get_local_id(1) == 0);
+
+    if(firstThread) {
+        state = simplexStates[groupId];
+        if(state == SIMPLEX_STATE_INIT_ALL) {
+            initSimplexVec(0, mySimplexVecs, patchVec);
+            initSimplexVec(1, mySimplexVecs, patchVec+stepX);
+            initSimplexVec(2, mySimplexVecs, patchVec+stepY);
+            initSimplexVec(3, mySimplexVecs, patchVec+stepZ);
+            state = SIMPLEX_STATE_INIT;
+        }
+        else {
+            for(int i=0; i<4; i++) {
+                mySimplexVecs[i] = simplexVecs[4*groupId+i];
             }
-            cstep++;
-            //if(nreduce > 3 && fabs(oldval-val) < .001f) break;
-            encodedVec.w = maxDiff;
         }
     }
-    //float val = evalF(images, projections, center, ray, dscale,
-    //    ascale, ipscales, indexes, xaxes, yaxes, zaxes,
-    //    imCenters, patchVecPtr[0], level, nIndexes);
-    //float val = evalF(patchVecPtr[0], images, &args);
 
-    if(get_local_id(0) == 0 && get_local_id(1) == 0) {
-        encodedVecs[groupId].x = patchVec.x;
-        encodedVecs[groupId].y = patchVec.y;
-        encodedVecs[groupId].z = patchVec.z;
-        encodedVecs[groupId].w = encodedVec.w;
+    int cstep=0;
+    int hi, s_hi, lo=0, initIdx;
+    double dhi, ds_hi, dlo;
+    double val, val2;
+    double3 testVec, testVecLast;
+
+    if(encodedVec.w >= 0) {
+        while(cstep < maxSteps) {
+            // use one thread to find next point to eval
+            if(firstThread) {
+                if(state == SIMPLEX_STATE_INIT) {
+                    initIdx = -1;
+                    for(int i=initIdx; i<4; i++) {
+                        if(mySimplexVecs[i].w < 0) {
+                            initIdx = i;
+                            break;
+                        }
+                    }
+                    if(initIdx==-1) {
+                        state = SIMPLEX_STATE_REFLECT;
+                    }
+                    else {
+                        testVecLocal = as_double3(mySimplexVecs[initIdx]);
+                    }
+                }
+                if(state == SIMPLEX_STATE_REFLECT) {
+                    dhi = dlo = mySimplexVecs[0].w;
+                    hi = lo = 0;
+                    ds_hi = mySimplexVecs[1].w;
+                    s_hi = 1;
+
+                    for(int i=1; i<4; i++) {
+                        val = mySimplexVecs[i].w;
+                        if(val < dlo) {
+                            dlo = val;
+                            lo = i;
+                        }
+                        else if(val > dhi) {
+                            ds_hi = dhi;
+                            s_hi = hi;
+                            dhi = val;
+                            hi = i;
+                        }
+                        else if(val > ds_hi) {
+                            ds_hi = val;
+                            s_hi = i;
+                        }
+                    }
+                    testVecLocal = simplexReflect(-1., mySimplexVecs, hi);
+                }
+                else if(state == SIMPLEX_STATE_EXPAND) {
+                    testVecLocal = simplexReflect(-2, mySimplexVecs, hi);
+                }
+                else if(state == SIMPLEX_STATE_CONTRACT) {
+                    testVecLocal = simplexReflect(.5, mySimplexVecs, hi);
+                }
+            }
+            
+            // copy eval point to all threads
+            barrier(CLK_LOCAL_MEM_FENCE);
+            testVec = testVecLocal;
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            // evaluate patch score on all threads
+            float val = evalF(testVec, images, &args);
+
+            // figure out new state on first thread
+            if(firstThread) {
+                if(state == SIMPLEX_STATE_INIT) {
+                    setSimplexVec(initIdx, mySimplexVecs, testVec, val);
+                    initIdx++;
+                }
+                else if(state == SIMPLEX_STATE_REFLECT) {
+                    /*
+                    if(val < mySimplexVecs[lo].w) {
+                        testVecLast = testVec;
+                        val2 = val;
+                        state = SIMPLEX_STATE_EXPAND;
+                    }
+                    else if(val > mySimplexVecs[s_hi].w) {
+                        if(val < mySimplexVecs[hi].w) {
+                            setSimplexVec(hi, mySimplexVecs, testVec, val);
+                        }
+                        state = SIMPLEX_STATE_CONTRACT;
+                    }
+                    else {
+                        setSimplexVec(hi, mySimplexVecs, testVec, val);
+                    }
+                    */
+                    if(val < mySimplexVecs[hi].w) {
+                        setSimplexVec(hi, mySimplexVecs, testVec, val);
+                    }
+                }
+                /*
+                else if(state == SIMPLEX_STATE_EXPAND) {
+                    if(val < mySimplexVecs[lo].w) {
+                        setSimplexVec(hi, mySimplexVecs, testVec, val);
+                    }
+                    else {
+                        setSimplexVec(hi, mySimplexVecs, testVecLast, val2);
+                    }
+                    state = SIMPLEX_STATE_REFLECT;
+                }
+                else if(state == SIMPLEX_STATE_CONTRACT) {
+                    if(val <= mySimplexVecs[hi].w) {
+                        setSimplexVec(hi, mySimplexVecs, testVec, val);
+                        state = SIMPLEX_STATE_REFLECT;
+                    }
+                    else {
+                        simplexMoveTowardsBest(mySimplexVecs, lo);
+                        state = SIMPLEX_STATE_INIT;
+                        initIdx = 0;
+                    }
+                }
+                */
+            }
+            cstep++;
+        }
+    }
+
+    // store global state
+    if(firstThread) {
+        encodedVec = mySimplexVecs[lo];
+        encodedVecs[groupId].x = encodedVec.x;
+        encodedVecs[groupId].y = encodedVec.y;
+        encodedVecs[groupId].z = encodedVec.z;
+        encodedVecs[groupId].w = simplexFVariance(mySimplexVecs);
+        for(int i=0; i<4; i++) {
+            simplexVecs[4*groupId+i] = mySimplexVecs[i];
+        }
+        if(state == SIMPLEX_STATE_EXPAND) {
+            // have to redo an iteration in this case
+            // only way to avoid it is to store more global state
+            state = SIMPLEX_STATE_REFLECT;
+        }
+        simplexStates[groupId] = state;
     }
     barrier(CLK_GLOBAL_MEM_FENCE);
 }

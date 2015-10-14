@@ -11,7 +11,8 @@ CrefineThread::CrefineThread(int numPostProcessThreads, CasyncQueue<RefineWorkIt
         m_optim(findMatch.m_optim),
         m_fm(findMatch),
         m_numTasks(0),
-        m_initialized(false)
+        m_initialized(false),
+        m_simplexStateInitAll(0)
 {
     m_idleVec = {0,0,0,-1};
     m_encodedVecs = (cl_double4 *)malloc(REFINE_MAX_TASKS*sizeof(cl_double4));
@@ -124,6 +125,14 @@ void CrefineThread::initCL() {
     if(clErr < 0) {
         printf("error setKernelArg 4 %d\n", clErr);
     }
+    clErr = clSetKernelArg(m_clKernel, 5, sizeof(cl_mem), &m_clSimplexVecs);
+    if(clErr < 0) {
+        printf("error setKernelArg 5 %d\n", clErr);
+    }
+    clErr = clSetKernelArg(m_clKernel, 6, sizeof(cl_mem), &m_clSimplexStates);
+    if(clErr < 0) {
+        printf("error setKernelArg 6 %d\n", clErr);
+    }
 }
 
 void CrefineThread::rgbToRGBA(int width, int height, unsigned char *in, unsigned char *out) {
@@ -200,16 +209,24 @@ void CrefineThread::initCLImageParams() {
 }
 
 void CrefineThread::initCLPatchParams() {
-  cl_int clErr;
+    cl_int clErr;
 
-  m_clPatchParams = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, REFINE_MAX_TASKS*sizeof(CLPatchParams), NULL, &clErr);
-  if(clErr < 0) {
-      printf("error createBuffer PatchParams %d\n", clErr);
-  }
-  m_clEncodedVecs = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, REFINE_MAX_TASKS*sizeof(cl_double4), NULL, &clErr);
-  if(clErr < 0) {
-      printf("error createBuffer EncodedVecs %d\n", clErr);
-  }
+    m_clPatchParams = clCreateBuffer(m_clCtx, CL_MEM_READ_ONLY, REFINE_MAX_TASKS*sizeof(CLPatchParams), NULL, &clErr);
+    if(clErr < 0) {
+        printf("error createBuffer PatchParams %d\n", clErr);
+    }
+    m_clEncodedVecs = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, REFINE_MAX_TASKS*sizeof(cl_double4), NULL, &clErr);
+    if(clErr < 0) {
+        printf("error createBuffer EncodedVecs %d\n", clErr);
+    }
+    m_clSimplexVecs = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, 4*REFINE_MAX_TASKS*sizeof(cl_double4), NULL, &clErr);
+    if(clErr < 0) {
+        printf("error createBuffer SimplexVecs %d\n", clErr);
+    }
+    m_clSimplexStates = clCreateBuffer(m_clCtx, CL_MEM_READ_WRITE, REFINE_MAX_TASKS*sizeof(cl_int), NULL, &clErr);
+    if(clErr < 0) {
+        printf("error createBuffer SimplexVecs %d\n", clErr);
+    }
 }
 
 void CrefineThread::destroyCL() {
@@ -275,6 +292,7 @@ void CrefineThread::threadLoop() {
         m_idleTaskIds.push(i);
         writeEncodedVecToBuffer(i, m_idleVec);
     }
+    initializeAllSimplexStates();
     int running = 1;
     while(running) {
         while(m_numTasks < REFINE_MAX_TASKS) {
@@ -313,6 +331,7 @@ void CrefineThread::addTask(RefineWorkItem &workItem) {
     m_taskMap[workItem.taskId] = workItem;
     writeParamsToBuffer(workItem.taskId, *workItem.patchParams);
     writeEncodedVecToBuffer(workItem.taskId, workItem.encodedVec);
+    initializeSimplexState(workItem.taskId);
 }
 
 void CrefineThread::iterateRefineTasks() {
@@ -333,9 +352,8 @@ void CrefineThread::iterateRefineTasks() {
             cl_double4 buff = m_encodedVecs[iter->second.taskId];
             if(buff.w < .001 || iter->second.numIterations >= 200) {
                 iter->second.encodedVec = buff;
-                //m_optim.finishRefine(*(iter->second.patch), iter->second.id, buff, REFINE_SUCCESS);
-                //printf("buffer val %lf %lf %lf %lf\n", buff.x, buff.y, buff.z, buff.w);
-                //m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
+                printf("buffer val %lf %lf %lf %lf\n", buff.x, buff.y, buff.z, buff.w);
+                m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
                 iter->second.status = REFINE_TASK_COMPLETE;
             }
         }
@@ -368,7 +386,7 @@ void CrefineThread::writeParamsToBuffer(int taskId, CLPatchParams &patchParams) 
     clErr = clEnqueueWriteBuffer(m_clQueue, m_clPatchParams, false, taskId*sizeof(CLPatchParams), sizeof(CLPatchParams), &patchParams,
             0, NULL, NULL);
     if(clErr < 0) {
-        printf("error writing patchParams to buffer %d\n", taskId);
+        printf("error writing patchParams to buffer %d, %d\n", clErr, taskId);
     }
 }
 
@@ -377,7 +395,24 @@ void CrefineThread::writeEncodedVecToBuffer(int taskId, cl_double4 &encodedVec) 
     clErr = clEnqueueWriteBuffer(m_clQueue, m_clEncodedVecs, false, taskId*sizeof(cl_double4), sizeof(cl_double4), &encodedVec,
             0, NULL, NULL);
     if(clErr < 0) {
-        printf("error writing encodedVec to buffer %d\n", taskId);
+        printf("error writing encodedVec to buffer %d %d\n", clErr, taskId);
     }
 }
 
+void CrefineThread::initializeSimplexState(int taskId) {
+    cl_int clErr;
+    clErr = clEnqueueWriteBuffer(m_clQueue, m_clSimplexStates, false, taskId*sizeof(cl_int), sizeof(cl_int), &m_simplexStateInitAll,
+            0, NULL, NULL);
+    if(clErr < 0) {
+        printf("error writing simplexState to buffer %d %d\n", clErr, taskId);
+    }
+}
+
+void CrefineThread::initializeAllSimplexStates() {
+    cl_int clErr;
+    clErr = clEnqueueFillBuffer(m_clQueue, m_clSimplexStates, &m_simplexStateInitAll, sizeof(cl_int), 0, REFINE_MAX_TASKS*sizeof(cl_int),
+            0, NULL, NULL);
+    if(clErr < 0) {
+        printf("error writing simplexStates to buffer %d\n", clErr);
+    }
+}
