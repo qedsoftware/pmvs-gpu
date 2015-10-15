@@ -361,7 +361,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     }
 
     int cstep=0;
-    int hi, s_hi, lo=0, initIdx;
+    int hi, s_hi, lo=0, initIdx=0;
     float dhi, ds_hi, dlo;
     float val, val2;
     float3 testVec, testVecLast;
@@ -371,8 +371,9 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
             // use one thread to find next point to eval
             if(firstThread) {
                 if(state == SIMPLEX_STATE_INIT) {
+                    int i=initIdx;
                     initIdx = -1;
-                    for(int i=initIdx; i<4; i++) {
+                    for(; i<4; i++) {
                         if(mySimplexVecs[i].w < 0) {
                             initIdx = i;
                             break;
