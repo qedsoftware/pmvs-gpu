@@ -29,12 +29,9 @@ typedef struct _PatchParams {
 } PatchParams;
 
 struct FArgs {
-    __local PatchParams *patch;
+    PatchParams *patch;
     __constant ImageParams *images;
     int level;
-    __local float *refData;
-    __local float *imData;
-    __local float *localVal;
 };
 
 float4 decodeCoord(float4 center, float4 ray, float dscale, float3 patchVec) {
@@ -77,6 +74,11 @@ float3 project(__constant float4 *projections, float4 coord) {
     return vtmp;
 }
 
+float2 project2(__constant float4 *projections, float4 coord) {
+    float3 p3 = project(projections, coord);
+    return (float2)(p3.x, p3.y);
+}
+
 float4 getPAxis(__constant float4 *projections, float4 coord, float4 normal, float3 axis3, float pscale) {
     float4 paxis;
     paxis.x = axis3.x;
@@ -90,6 +92,7 @@ float4 getPAxis(__constant float4 *projections, float4 coord, float4 normal, flo
     return paxis / dis;
 }
 
+/*
 void imNormalize(__local float *texData, float4 cavg) {
     float std=0.f;
     float3 cnorm;
@@ -120,45 +123,28 @@ int grabTex(__read_only image2d_array_t images,
         float4 pzaxis,
         __local float *texData) {
     float4 cavg = 0.f;
-    float4 ray = normalize(imCenter - coord);
     size_t localX = get_local_id(0);
     size_t localY = get_local_id(1);
     
-    const float weight = max(0.0f, dot(ray, pzaxis));
-
-    //if (weight < cos(m_fm.m_angleThreshold1))
-    //  return 1;
-
-    const int margin = WSIZE / 2;
-
-    float3 center = project(projection, coord);
-    float3 dx = project(projection, coord + pxaxis) - center;
-    float3 dy = project(projection, coord + pyaxis) - center;
-
-    // TODO leveldif
-
-    float3 left = center - dx * margin - dy * margin;
-
     __local float* texp = texData - 1;
     float4 imCoord;
     imCoord.z = imIndex;
     imCoord.w = 0.f;
-    /*
-    for (int y = 0; y < WSIZE; ++y) {
-      float3 vftmp = left;
-      left += dy;
-      for (int x = 0; x < WSIZE; ++x) {
-        imCoord.x = vftmp.x+.5;
-        imCoord.y = vftmp.y+.5;
-        float4 color;
-        color = read_imagef(images, imSampler, imCoord);
-        *(++texp) = color.x;
-        *(++texp) = color.y;
-        *(++texp) = color.z;
-        vftmp += dx;
-      }
-    }
-    */
+    //for (int y = 0; y < WSIZE; ++y) {
+    //  float3 vftmp = left;
+    //  left += dy;
+    //  for (int x = 0; x < WSIZE; ++x) {
+    //    imCoord.x = vftmp.x+.5;
+    //    imCoord.y = vftmp.y+.5;
+    //    float4 color;
+    //    color = read_imagef(images, imSampler, imCoord);
+    //    *(++texp) = color.x;
+    //    *(++texp) = color.y;
+    //    *(++texp) = color.z;
+    //    vftmp += dx;
+    //  }
+    //}
+
     float3 imCoord3 = left + dx * localX + dy * localY;
     imCoord.x = imCoord3.x + .5;
     imCoord.y = imCoord3.y + .5;
@@ -180,6 +166,74 @@ int grabTex(__read_only image2d_array_t images,
     }
     return 0;
 }
+*/
+
+float3 computeTexParams(__constant float4 *projection,
+        float4 coord,
+        float4 pxaxis,
+        float4 pyaxis,
+        float2 *begin,
+        float2 *dx,
+        float2 *dy) {
+    //const float weight = max(0.0f, dot(ray, pzaxis));
+
+    //if (weight < cos(m_fm.m_angleThreshold1))
+    //  return 1;
+
+    const int margin = WSIZE / 2;
+
+    float2 center = project2(projection, coord);
+    *dx = project2(projection, coord + pxaxis) - center;
+    *dy = project2(projection, coord + pyaxis) - center;
+
+    // TODO leveldif
+
+    *begin = center - (*dx) * margin - (*dy) * margin;
+}
+
+float3 texAvg(float2 *begin, float2 *dx, float2 *dy, __read_only image2d_array_t images, int imIndex) {
+    float2 left = *begin;
+    float2 ccoord;
+    float4 imCoord;
+    imCoord.z = imIndex;
+    imCoord.w = 0.f;
+    float3 t = (float3)(0,0,0);
+    for(int y=0; y < WSIZE; y++) {
+        ccoord = left;
+        left += *dy;
+        for(int x=0; x < WSIZE; x++) {
+            imCoord.x = ccoord.x+.5;
+            imCoord.y = ccoord.y+.5;
+            float4 color = read_imagef(images, imSampler, imCoord);
+            t += as_float3(color);
+            ccoord += *dx;
+        }
+    }
+    return t / (WSIZE*WSIZE);
+}
+
+float texStd(float2 *begin, float2 *dx, float2 *dy, float3 *avg, __read_only image2d_array_t images, int imIndex) {
+    float2 left = *begin;
+    float2 ccoord;
+    float4 imCoord;
+    imCoord.z = imIndex;
+    imCoord.w = 0.f;
+    float3 cnorm;
+    float std=0.f;
+    for(int y=0; y < WSIZE; y++) {
+        ccoord = left;
+        left += *dy;
+        for(int x=0; x < WSIZE; x++) {
+            imCoord.x = ccoord.x+.5;
+            imCoord.y = ccoord.y+.5;
+            float4 color = read_imagef(images, imSampler, imCoord);
+            cnorm = as_float3(color) - *avg;
+            std += dot(cnorm, cnorm);
+            ccoord += *dx;
+        }
+    }
+    return sqrt(std/(WSIZE*WSIZE*3));
+}
 
 float robustincc(const float rhs) {
     return rhs / (1 + 3 * rhs);
@@ -188,8 +242,6 @@ float robustincc(const float rhs) {
 float evalF(float3 patchVec,
         __read_only image2d_array_t images,
         struct FArgs *args) {
-    size_t localX = get_local_id(0);
-    size_t localY = get_local_id(1);
     float4 coord = decodeCoord(args->patch->center, args->patch->ray, args->patch->dscale, patchVec);
     int refIdx = args->patch->indexes[0];
     float4 normal = decodeNormal(args->images[refIdx].xaxis, args->images[refIdx].yaxis, args->images[refIdx].zaxis,
@@ -201,66 +253,63 @@ float evalF(float3 patchVec,
     __constant float4 *refProj = args->images[refIdx].projection;
     float4 pxaxis = getPAxis(refProj, coord, normal, xaxis3, pscale);
     float4 pyaxis = getPAxis(refProj, coord, normal, yaxis3, pscale);
-    grabTex(images, refIdx, refProj, args->images[refIdx].center, coord, pxaxis, pyaxis, normal, args->refData);
-    float ans = 0.;
-    int denom = 0;
+    float2 refBegin;
+    float2 refDX;
+    float2 refDY;
+    computeTexParams(refProj, coord, pxaxis, pyaxis, &refBegin, &refDX, &refDY);
+    float3 refAvg = texAvg(&refBegin, &refDX, &refDY, images, refIdx);
+    float refStd = texStd(&refBegin, &refDX, &refDY, &refAvg, images, refIdx);
+    float ans=0.f;
+    int denom=0;
     for(int i=1; i < args->patch->nIndexes; i++) {
         int imIdx = args->patch->indexes[i];
-        __constant float4 *imProj = args->images[imIdx].projection;
-        grabTex(images, imIdx, imProj, args->images[imIdx].center, coord, pxaxis, pyaxis, normal, args->imData);
-        float corr = 0.;
-        if(localX == 0 && localY == 0) {
-            for(int j=0; j<WSIZE*WSIZE*3; j++) {
-                corr += args->refData[j] * args->imData[j];
+        float2 imBegin, imDX, imDY;
+        computeTexParams(args->images[imIdx].projection, coord, pxaxis, pyaxis, &imBegin, &imDX, &imDY);
+        float3 imAvg = texAvg(&imBegin, &imDX, &imDY, images, imIdx);
+        float imStd = texStd(&imBegin, &imDX, &imDY, &imAvg, images, imIdx);
+        float2 imLeft = imBegin;
+        float2 refLeft = refBegin;
+        float4 imCoord, refCoord;
+        imCoord.z = imIdx;
+        imCoord.w = 0.f;
+        refCoord.z = refIdx;
+        refCoord.w = 0.f;
+        float2 imc, refc;
+        float corr = 0.f;
+        for(int y=0; y<WSIZE; y++) {
+            imc = imLeft;
+            refc = refLeft;
+            imLeft += imDY;
+            refLeft += refDY;
+            for(int x=0; x<WSIZE; x++) {
+                imCoord.x = imc.x + .5;
+                imCoord.y = imc.y + .5;
+                refCoord.x = refc.x + .5;
+                refCoord.y = refc.y + .5;
+                float3 imColor = as_float3(read_imagef(images, imSampler, imCoord));
+                float3 refColor = as_float3(read_imagef(images, imSampler, refCoord));
+                corr += dot((imColor - imAvg) / imStd, (refColor - refAvg) / refStd);
+                imc += imDX;
+                refc += refDX;
             }
-            ans += robustincc(1.-corr/(WSIZE*WSIZE*3));
-            denom++;
         }
-        barrier(CLK_LOCAL_MEM_FENCE);
+        ans += robustincc(1.-corr/(WSIZE*WSIZE*3));
+        denom++;
     }
-    if(localX == 0 && localY == 0) {
-        *(args->localVal) = ans / denom;
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
-    return *(args->localVal);
+    return ans / denom;
 }
 
-float3 testStep(float3 patchVec, float3 step, __read_only image2d_array_t images, struct FArgs *args, 
-        float *val, bool *didStep, float *maxDiff) {
-    size_t localX = get_local_id(0);
-    size_t localY = get_local_id(1);
-    float3 test1 = patchVec+step;
-    float3 test2 = patchVec-step;
-    float newval = evalF(test1, images, args);
-    float diff = fabs(newval-*val);
-    if(diff > *maxDiff) *maxDiff = diff;
-    if(newval < *val) {
-        patchVec = test1;
-        *val = newval;
-        *didStep = true;
-    }
-    newval = evalF(test2, images, args);
-    diff = fabs(newval-*val);
-    if(diff > *maxDiff) *maxDiff = diff;
-    if(newval < *val) {
-        patchVec = test2;
-        *val = newval;
-        *didStep = true;
-    }
-    return patchVec;
-}
-
-void initSimplexVec(int i, __local float4 *simplexVecs, float3 vec) {
-    *((__local float3 *)(simplexVecs+i)) = vec;
+void initSimplexVec(int i, float4 *simplexVecs, float3 vec) {
+    *((float3 *)(simplexVecs+i)) = vec;
     simplexVecs[i].w = -1;
 }
 
-void setSimplexVec(int i, __local float4 *simplexVecs, float3 vec, float val) {
-    *((__local float3 *)(simplexVecs+i)) = vec;
+void setSimplexVec(int i, float4 *simplexVecs, float3 vec, float val) {
+    *((float3 *)(simplexVecs+i)) = vec;
     simplexVecs[i].w = val;
 }
 
-float3 simplexReflect(float coeff, __local float4 *simplexVecs, int hi) {
+float3 simplexReflect(float coeff, float4 *simplexVecs, int hi) {
     float3 v = (float3)(0,0,0);
     for(int i=0; i<4; i++) {
         if(i==hi) continue;
@@ -271,7 +320,7 @@ float3 simplexReflect(float coeff, __local float4 *simplexVecs, int hi) {
     return v;
 }
 
-void simplexMoveTowardsBest(__local float4 *simplexVecs, int lo) {
+void simplexMoveTowardsBest(float4 *simplexVecs, int lo) {
     float3 vlo = as_float3(simplexVecs[lo]);
     float3 v;
     for(int i=0; i<4; i++) {
@@ -281,7 +330,7 @@ void simplexMoveTowardsBest(__local float4 *simplexVecs, int lo) {
     }
 }
 
-float simplexFVariance(__local float4 *simplexVecs) {
+float simplexFVariance(float4 *simplexVecs) {
     float m=0;
     for(int i=0; i<4; i++) {
         m += simplexVecs[i].w;
@@ -294,7 +343,7 @@ float simplexFVariance(__local float4 *simplexVecs) {
     return sqrt(t);
 }
 
-float simplexSize(__local float4 *simplexVecs) {
+float simplexSize(float4 *simplexVecs) {
     float3 center = (float3)(0,0,0);
     for(int i=0; i<4; i++) {
         center += as_float3(simplexVecs[i]);
@@ -315,26 +364,19 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
         __global float4 *simplexVecs, /* 5 */
         __global int *simplexStates) /* 6 */
 {
-    __local float refData[3*WSIZE*WSIZE];
-    __local float imData[3*WSIZE*WSIZE];
-    __local float localVal;
-    __local float3 testVecLocal;
-    __local float4 mySimplexVecs[4];
-    __local PatchParams myPatchParams;
+    float4 mySimplexVecs[4];
+    PatchParams myPatchParams;
 
-    size_t groupId = get_group_id(0);
+    size_t globalId = get_global_id(0);
 
-    myPatchParams = patchParams[groupId];
-    float4 encodedVec = encodedVecs[groupId];
+    myPatchParams = patchParams[globalId];
+    float4 encodedVec = encodedVecs[globalId];
     float3 patchVec = (float3)(encodedVec.x, encodedVec.y, encodedVec.z);
 
     struct FArgs args;
     args.images = imageParams;
     args.patch = &myPatchParams;
     args.level = level;
-    args.refData = refData;
-    args.imData = imData;
-    args.localVal = &localVal;
 
     int maxSteps = 10;
     float3 stepX = (float3)(1.,0,0);
@@ -342,21 +384,18 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     float3 stepZ = (float3)(0,0,1.);
 
     int state;
-    bool firstThread = (get_local_id(0) == 0 && get_local_id(1) == 0);
 
-    if(firstThread) {
-        state = simplexStates[groupId];
-        if(state == SIMPLEX_STATE_INIT_ALL) {
-            initSimplexVec(0, mySimplexVecs, patchVec);
-            initSimplexVec(1, mySimplexVecs, patchVec+stepX);
-            initSimplexVec(2, mySimplexVecs, patchVec+stepY);
-            initSimplexVec(3, mySimplexVecs, patchVec+stepZ);
-            state = SIMPLEX_STATE_INIT;
-        }
-        else {
-            for(int i=0; i<4; i++) {
-                mySimplexVecs[i] = simplexVecs[4*groupId+i];
-            }
+    state = simplexStates[globalId];
+    if(state == SIMPLEX_STATE_INIT_ALL) {
+        initSimplexVec(0, mySimplexVecs, patchVec);
+        initSimplexVec(1, mySimplexVecs, patchVec+stepX);
+        initSimplexVec(2, mySimplexVecs, patchVec+stepY);
+        initSimplexVec(3, mySimplexVecs, patchVec+stepZ);
+        state = SIMPLEX_STATE_INIT;
+    }
+    else {
+        for(int i=0; i<4; i++) {
+            mySimplexVecs[i] = simplexVecs[4*globalId+i];
         }
     }
 
@@ -368,106 +407,97 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
 
     if(encodedVec.w >= 0) {
         while(cstep < maxSteps) {
-            // use one thread to find next point to eval
-            if(firstThread) {
-                if(state == SIMPLEX_STATE_INIT) {
-                    int i=initIdx;
-                    initIdx = -1;
-                    for(; i<4; i++) {
-                        if(mySimplexVecs[i].w < 0) {
-                            initIdx = i;
-                            break;
-                        }
-                    }
-                    if(initIdx==-1) {
-                        state = SIMPLEX_STATE_REFLECT;
-                    }
-                    else {
-                        testVecLocal = as_float3(mySimplexVecs[initIdx]);
+            // find next point to eval
+            if(state == SIMPLEX_STATE_INIT) {
+                int i=initIdx;
+                initIdx = -1;
+                for(; i<4; i++) {
+                    if(mySimplexVecs[i].w < 0) {
+                        initIdx = i;
+                        break;
                     }
                 }
-                if(state == SIMPLEX_STATE_REFLECT) {
-                    dhi = dlo = mySimplexVecs[0].w;
-                    hi = lo = 0;
-                    ds_hi = mySimplexVecs[1].w;
-                    s_hi = 1;
-
-                    for(int i=1; i<4; i++) {
-                        val = mySimplexVecs[i].w;
-                        if(val < dlo) {
-                            dlo = val;
-                            lo = i;
-                        }
-                        else if(val > dhi) {
-                            ds_hi = dhi;
-                            s_hi = hi;
-                            dhi = val;
-                            hi = i;
-                        }
-                        else if(val > ds_hi) {
-                            ds_hi = val;
-                            s_hi = i;
-                        }
-                    }
-                    testVecLocal = simplexReflect(-1., mySimplexVecs, hi);
-                }
-                else if(state == SIMPLEX_STATE_EXPAND) {
-                    testVecLocal = simplexReflect(-2, mySimplexVecs, hi);
-                }
-                else if(state == SIMPLEX_STATE_CONTRACT) {
-                    testVecLocal = simplexReflect(.5, mySimplexVecs, hi);
-                }
-            }
-            
-            // copy eval point to all threads
-            barrier(CLK_LOCAL_MEM_FENCE);
-            testVec = testVecLocal;
-            barrier(CLK_LOCAL_MEM_FENCE);
-
-            // evaluate patch score on all threads
-            float val = evalF(testVec, images, &args);
-
-            // figure out new state on first thread
-            if(firstThread) {
-                if(state == SIMPLEX_STATE_INIT) {
-                    setSimplexVec(initIdx, mySimplexVecs, testVec, val);
-                    initIdx++;
-                }
-                else if(state == SIMPLEX_STATE_REFLECT) {
-                    if(val < mySimplexVecs[lo].w) {
-                        testVecLast = testVec;
-                        val2 = val;
-                        state = SIMPLEX_STATE_EXPAND;
-                    }
-                    else if(val > mySimplexVecs[s_hi].w) {
-                        if(val < mySimplexVecs[hi].w) {
-                            setSimplexVec(hi, mySimplexVecs, testVec, val);
-                        }
-                        state = SIMPLEX_STATE_CONTRACT;
-                    }
-                    else {
-                        setSimplexVec(hi, mySimplexVecs, testVec, val);
-                    }
-                }
-                else if(state == SIMPLEX_STATE_EXPAND) {
-                    if(val < mySimplexVecs[lo].w) {
-                        setSimplexVec(hi, mySimplexVecs, testVec, val);
-                    }
-                    else {
-                        setSimplexVec(hi, mySimplexVecs, testVecLast, val2);
-                    }
+                if(initIdx==-1) {
                     state = SIMPLEX_STATE_REFLECT;
                 }
-                else if(state == SIMPLEX_STATE_CONTRACT) {
-                    if(val <= mySimplexVecs[hi].w) {
+                else {
+                    testVec = as_float3(mySimplexVecs[initIdx]);
+                }
+            }
+            if(state == SIMPLEX_STATE_REFLECT) {
+                dhi = dlo = mySimplexVecs[0].w;
+                hi = lo = 0;
+                ds_hi = mySimplexVecs[1].w;
+                s_hi = 1;
+
+                for(int i=1; i<4; i++) {
+                    val = mySimplexVecs[i].w;
+                    if(val < dlo) {
+                        dlo = val;
+                        lo = i;
+                    }
+                    else if(val > dhi) {
+                        ds_hi = dhi;
+                        s_hi = hi;
+                        dhi = val;
+                        hi = i;
+                    }
+                    else if(val > ds_hi) {
+                        ds_hi = val;
+                        s_hi = i;
+                    }
+                }
+                testVec = simplexReflect(-1., mySimplexVecs, hi);
+            }
+            else if(state == SIMPLEX_STATE_EXPAND) {
+                testVec = simplexReflect(-2, mySimplexVecs, hi);
+            }
+            else if(state == SIMPLEX_STATE_CONTRACT) {
+                testVec = simplexReflect(.5, mySimplexVecs, hi);
+            }
+        
+            // branches converged, send all threads in warp to evalF
+            val = evalF(testVec, images, &args);
+
+            // figure out new state
+            if(state == SIMPLEX_STATE_INIT) {
+                setSimplexVec(initIdx, mySimplexVecs, testVec, val);
+                initIdx++;
+            }
+            else if(state == SIMPLEX_STATE_REFLECT) {
+                if(val < mySimplexVecs[lo].w) {
+                    testVecLast = testVec;
+                    val2 = val;
+                    state = SIMPLEX_STATE_EXPAND;
+                }
+                else if(val > mySimplexVecs[s_hi].w) {
+                    if(val < mySimplexVecs[hi].w) {
                         setSimplexVec(hi, mySimplexVecs, testVec, val);
-                        state = SIMPLEX_STATE_REFLECT;
                     }
-                    else {
-                        simplexMoveTowardsBest(mySimplexVecs, lo);
-                        state = SIMPLEX_STATE_INIT;
-                        initIdx = 0;
-                    }
+                    state = SIMPLEX_STATE_CONTRACT;
+                }
+                else {
+                    setSimplexVec(hi, mySimplexVecs, testVec, val);
+                }
+            }
+            else if(state == SIMPLEX_STATE_EXPAND) {
+                if(val < mySimplexVecs[lo].w) {
+                    setSimplexVec(hi, mySimplexVecs, testVec, val);
+                }
+                else {
+                    setSimplexVec(hi, mySimplexVecs, testVecLast, val2);
+                }
+                state = SIMPLEX_STATE_REFLECT;
+            }
+            else if(state == SIMPLEX_STATE_CONTRACT) {
+                if(val <= mySimplexVecs[hi].w) {
+                    setSimplexVec(hi, mySimplexVecs, testVec, val);
+                    state = SIMPLEX_STATE_REFLECT;
+                }
+                else {
+                    simplexMoveTowardsBest(mySimplexVecs, lo);
+                    state = SIMPLEX_STATE_INIT;
+                    initIdx = 0;
                 }
             }
             cstep++;
@@ -475,22 +505,19 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     }
 
     // store global state
-    if(firstThread) {
-        encodedVec = mySimplexVecs[lo];
-        encodedVecs[groupId].x = encodedVec.x;
-        encodedVecs[groupId].y = encodedVec.y;
-        encodedVecs[groupId].z = encodedVec.z;
-        //encodedVecs[groupId].w = simplexFVariance(mySimplexVecs);
-        encodedVecs[groupId].w = simplexSize(mySimplexVecs);
-        for(int i=0; i<4; i++) {
-            simplexVecs[4*groupId+i] = mySimplexVecs[i];
-        }
-        if(state == SIMPLEX_STATE_EXPAND) {
-            // have to redo an iteration in this case
-            // only way to avoid it is to store more global state
-            state = SIMPLEX_STATE_REFLECT;
-        }
-        simplexStates[groupId] = state;
+    encodedVec = mySimplexVecs[lo];
+    encodedVecs[globalId].x = encodedVec.x;
+    encodedVecs[globalId].y = encodedVec.y;
+    encodedVecs[globalId].z = encodedVec.z;
+    //encodedVecs[globalId].w = simplexFVariance(mySimplexVecs);
+    encodedVecs[globalId].w = simplexSize(mySimplexVecs);
+    for(int i=0; i<4; i++) {
+        simplexVecs[4*globalId+i] = mySimplexVecs[i];
     }
-    barrier(CLK_GLOBAL_MEM_FENCE);
+    if(state == SIMPLEX_STATE_EXPAND) {
+        // have to redo an iteration in this case
+        // only way to avoid it is to store more global state
+        state = SIMPLEX_STATE_REFLECT;
+    }
+    simplexStates[globalId] = state;
 }

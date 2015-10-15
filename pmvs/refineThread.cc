@@ -238,13 +238,10 @@ void CrefineThread::refinePatchesGPU() {
   int status;
   cl_int clErr;
 
-  size_t globalWorkOffset[2] = {0,0};
-  size_t globalWorkSize[2] = {REFINE_MAX_TASKS*m_fm.m_wsize,m_fm.m_wsize};
-  size_t localWorkSize[2] = {m_fm.m_wsize, m_fm.m_wsize};
-  //size_t globalWorkSize[2] = {1,1};
-  //size_t localWorkSize[2] = {1,1};
-  clErr = clEnqueueNDRangeKernel(m_clQueue, m_clKernel, 2, 
-          globalWorkOffset, globalWorkSize, localWorkSize,
+  size_t globalWorkOffset = 0;
+  size_t globalWorkSize = REFINE_MAX_TASKS;
+  clErr = clEnqueueNDRangeKernel(m_clQueue, m_clKernel, 1, 
+          &globalWorkOffset, &globalWorkSize, NULL,
           0, NULL, NULL);
   if(clErr < 0) {
       printf("error launching kernel %d\n", clErr);
@@ -354,8 +351,8 @@ void CrefineThread::iterateRefineTasks() {
             if(buff.w < .001 || iter->second.numIterations >= 100) {
                 m_totalIterations += iter->second.numIterations;
                 iter->second.encodedVec = buff;
-                //printf("buffer val %lf %lf %lf %lf\n", buff.x, buff.y, buff.z, buff.w);
-                //m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
+                printf("buffer val %lf %lf %lf %lf %d\n", buff.x, buff.y, buff.z, buff.w, iter->second.numIterations);
+                m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);
                 iter->second.status = REFINE_TASK_COMPLETE;
             }
         }
