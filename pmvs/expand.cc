@@ -70,6 +70,8 @@ void Cexpand::run(void) {
     pthread_join(expandThreads[c], NULL); 
   }
 
+  printf("total iterations %d\n", m_refineThread.totalIterations());
+
   m_idQueue.clear();
 
   cerr << endl

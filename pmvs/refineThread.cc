@@ -12,6 +12,7 @@ CrefineThread::CrefineThread(int numPostProcessThreads, CasyncQueue<RefineWorkIt
         m_fm(findMatch),
         m_numTasks(0),
         m_initialized(false),
+        m_totalIterations(0),
         m_simplexStateInitAll(0)
 {
     m_idleVec = {0,0,0,-1};
@@ -68,19 +69,19 @@ void CrefineThread::initCL() {
     //printf("%s\n", pcstr);
     printf("created cl program %d\n", clErr);
 
-    clBuildProgram(m_clProgram, 1, &m_clDevice, NULL, NULL, NULL);
+    clBuildProgram(m_clProgram, 1, &m_clDevice, "-cl-nv-verbose", NULL, NULL);
     cl_build_status buildStatus;
     clGetProgramBuildInfo(m_clProgram, m_clDevice,
             CL_PROGRAM_BUILD_STATUS, sizeof(cl_build_status), 
             &buildStatus, NULL);
+    char *buildLog = (char *)malloc(50*1024);
+    clErr = clGetProgramBuildInfo(m_clProgram, m_clDevice,
+            CL_PROGRAM_BUILD_LOG, 50*1024, buildLog, NULL);
+    printf("got build info %d\n", clErr);
+    printf("%s\n", buildLog);
+    free(buildLog);
     if(buildStatus != CL_BUILD_SUCCESS) {
         printf("error building program %d\n", buildStatus);
-        char *buildLog = (char *)malloc(50*1024);
-        clErr = clGetProgramBuildInfo(m_clProgram, m_clDevice,
-                CL_PROGRAM_BUILD_LOG, 50*1024, buildLog, NULL);
-        printf("got build info %d\n", clErr);
-        printf("%s\n", buildLog);
-        free(buildLog);
         std::exit(0);
     }
     else {
@@ -350,7 +351,8 @@ void CrefineThread::iterateRefineTasks() {
             //refinePatchGPU(*(iter->second.patch), iter->second.id, 100);
             iter->second.numIterations++;
             cl_float4 buff = m_encodedVecs[iter->second.taskId];
-            if(buff.w < .001 || iter->second.numIterations >= 200) {
+            if(buff.w < .001 || iter->second.numIterations >= 100) {
+                m_totalIterations += iter->second.numIterations;
                 iter->second.encodedVec = buff;
                 //printf("buffer val %lf %lf %lf %lf\n", buff.x, buff.y, buff.z, buff.w);
                 //m_optim.refinePatch(*(iter->second.patch), iter->second.id, 100);

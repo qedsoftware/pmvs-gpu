@@ -64,6 +64,7 @@ namespace PMVS3 {
             void enqueueWorkItem(RefineWorkItem &workItem);
             void clearWorkItems();
             bool isWaiting();
+            int totalIterations() {return m_totalIterations;};
 
         protected:
             CasyncQueue<RefineWorkItem> m_workQueue;
@@ -78,6 +79,7 @@ namespace PMVS3 {
             int m_numPostProcessThreads;
             int m_numTasks;
             bool m_initialized;
+            int m_totalIterations;
 
             //-----------------------------------------------------------------
             // OpenCL

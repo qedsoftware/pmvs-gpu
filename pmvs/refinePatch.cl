@@ -29,7 +29,7 @@ typedef struct _PatchParams {
 } PatchParams;
 
 struct FArgs {
-    PatchParams patch;
+    __local PatchParams *patch;
     __constant ImageParams *images;
     int level;
     __local float *refData;
@@ -150,7 +150,8 @@ int grabTex(__read_only image2d_array_t images,
       for (int x = 0; x < WSIZE; ++x) {
         imCoord.x = vftmp.x+.5;
         imCoord.y = vftmp.y+.5;
-        float4 color = read_imagef(images, imSampler, imCoord);
+        float4 color;
+        color = read_imagef(images, imSampler, imCoord);
         *(++texp) = color.x;
         *(++texp) = color.y;
         *(++texp) = color.z;
@@ -165,6 +166,7 @@ int grabTex(__read_only image2d_array_t images,
     texData[localY*WSIZE*3 + localX*3] = color.x;
     texData[localY*WSIZE*3 + localX*3 + 1] = color.y;
     texData[localY*WSIZE*3 + localX*3 + 2] = color.z;
+
     barrier(CLK_LOCAL_MEM_FENCE);
     if(localX == 0 && localY == 0) {
       texp = texData - 1;
@@ -188,10 +190,10 @@ float evalF(float3 patchVec,
         struct FArgs *args) {
     size_t localX = get_local_id(0);
     size_t localY = get_local_id(1);
-    float4 coord = decodeCoord(args->patch.center, args->patch.ray, args->patch.dscale, patchVec);
-    int refIdx = args->patch.indexes[0];
+    float4 coord = decodeCoord(args->patch->center, args->patch->ray, args->patch->dscale, patchVec);
+    int refIdx = args->patch->indexes[0];
     float4 normal = decodeNormal(args->images[refIdx].xaxis, args->images[refIdx].yaxis, args->images[refIdx].zaxis,
-           args->patch.ascale, patchVec);
+           args->patch->ascale, patchVec);
     float pscale = getUnit(args->images[refIdx].center, args->images[refIdx].ipscale, coord, args->level);
     float3 normal3 = (float3)(normal.x, normal.y, normal.z);
     float3 yaxis3 = normalize(cross(normal3, args->images[refIdx].xaxis));
@@ -202,8 +204,8 @@ float evalF(float3 patchVec,
     grabTex(images, refIdx, refProj, args->images[refIdx].center, coord, pxaxis, pyaxis, normal, args->refData);
     float ans = 0.;
     int denom = 0;
-    for(int i=1; i < args->patch.nIndexes; i++) {
-        int imIdx = args->patch.indexes[i];
+    for(int i=1; i < args->patch->nIndexes; i++) {
+        int imIdx = args->patch->indexes[i];
         __constant float4 *imProj = args->images[imIdx].projection;
         grabTex(images, imIdx, imProj, args->images[imIdx].center, coord, pxaxis, pyaxis, normal, args->imData);
         float corr = 0.;
@@ -318,16 +320,17 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     __local float localVal;
     __local float3 testVecLocal;
     __local float4 mySimplexVecs[4];
+    __local PatchParams myPatchParams;
 
     size_t groupId = get_group_id(0);
 
-    __global PatchParams *myPatchParams = patchParams + groupId;
+    myPatchParams = patchParams[groupId];
     float4 encodedVec = encodedVecs[groupId];
     float3 patchVec = (float3)(encodedVec.x, encodedVec.y, encodedVec.z);
 
     struct FArgs args;
     args.images = imageParams;
-    args.patch = *myPatchParams;
+    args.patch = &myPatchParams;
     args.level = level;
     args.refData = refData;
     args.imData = imData;
