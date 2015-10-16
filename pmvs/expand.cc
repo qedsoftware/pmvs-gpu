@@ -321,7 +321,7 @@ void Cexpand::postProcessThread(void) {
             break;
         }
         else {
-            //m_fm.m_optim.finishRefine(*(workItem.patch), workItem.id, workItem.encodedVec, REFINE_SUCCESS);
+            m_fm.m_optim.finishRefine(*(workItem.patch), workItem.id, workItem.encodedVec, REFINE_SUCCESS);
             int status = postProcessSub(workItem.patch, workItem.id);
             if(status == 1) {
                 pthread_mutex_lock(&m_queueLock);
