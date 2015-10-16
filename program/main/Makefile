@@ -8,13 +8,13 @@
 CXX = g++
 
 #Your INCLUDE path (e.g., -I/usr/include)
-YOUR_INCLUDE_PATH =-I/usr/local/include -I/home/jkevin/src/OpenDroneMap/include
+YOUR_INCLUDE_PATH =-I/usr/local/include
 
 #Your metis directory (contains header files under graclus1.2/metisLib/)
-YOUR_INCLUDE_METIS_PATH = -I/home/jkevin/src/OpenDroneMap/include/metisLib/
+YOUR_INCLUDE_METIS_PATH = -I/home/jkevin/src/graclus1.2/metisLib
 
 #Your LDLIBRARY path (e.g., -L/usr/lib)
-YOUR_LDLIB_PATH = -L/usr/local/lib -L/home/jkevin/src/OpenDroneMap/lib
+YOUR_LDLIB_PATH = -L/usr/local/lib -L/home/jkevin/src/graclus1.2
 
 ######################################################################
 CXXFLAGS_PMVS = -O2 -Wall -Wno-deprecated ${YOUR_INCLUDE_PATH}
@@ -77,7 +77,7 @@ clean:
 
 install:
 	mkdir -p /usr/share/pmvs-gpu
-	cp ../base/pmvs/refinePatch.cl /usr/share/pmvs2-gpu
+	cp ../base/pmvs/refinePatch.cl /usr/share/pmvs-gpu
 
 depend:
 	rm -f Dependencies
