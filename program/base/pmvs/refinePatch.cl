@@ -25,7 +25,7 @@ typedef struct _PatchParams {
     float dscale;
     float ascale;
     int nIndexes;
-    int indexes[10];
+    int indexes[100];
 } PatchParams;
 
 struct FArgs {

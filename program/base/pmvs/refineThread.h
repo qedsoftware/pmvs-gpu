@@ -36,7 +36,7 @@ namespace PMVS3 {
         cl_float dscale;
         cl_float ascale;
         cl_int nIndexes;
-        cl_int indexes[10];
+        cl_int indexes[100];
     } CLPatchParams;
 
     typedef boost::shared_ptr<CLPatchParams> PCLPatchParams;
