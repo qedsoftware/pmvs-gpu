@@ -75,6 +75,10 @@ cmvs.o: cmvs.cc
 clean:
 	/bin/rm -f core core.* *.o ${TARGET}
 
+install:
+	mkdir -p /usr/share/pmvs-gpu
+	cp ../base/pmvs/refinePatch.cl /usr/share/pmvs2-gpu
+
 depend:
 	rm -f Dependencies
 	for SOURCEFILE in `ls *.cc ../base/*/*.cc ../base/*/*.c ../base/*/*.C ../base/*/*.f`; do \

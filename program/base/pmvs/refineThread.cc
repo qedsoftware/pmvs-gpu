@@ -57,7 +57,7 @@ void CrefineThread::initCL() {
     }
     m_clDevice = devices[0];
 
-    std::ifstream t("/home/jkevin/src/OpenDroneMap/src/cmvs/program/base/pmvs/refinePatch.cl");
+    std::ifstream t("/usr/share/pmvs-gpu/refinePatch.cl");
     std::stringstream buffer;
     buffer << t.rdbuf();
     std::string pstr = buffer.str();
