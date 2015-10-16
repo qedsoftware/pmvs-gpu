@@ -56,7 +56,7 @@ void CfindMatch::init(const Soption& option) {
   m_visibleThresholdLoose = 0.0f;
   
   //m_tau = max(option.m_minImageNum * 2, min(m_num, 5));
-  m_tau = min(option.m_minImageNum * 2, m_num);
+  m_tau = min(M_TAU_MAX, min(option.m_minImageNum * 2, m_num));
   
   m_depth = 0;
   

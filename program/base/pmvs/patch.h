@@ -6,6 +6,8 @@
 #include <boost/shared_ptr.hpp>
 #include "../numeric/vec4.h"
 
+#define M_TAU_MAX 10
+
 namespace Patch {
 
 class Cpatch {

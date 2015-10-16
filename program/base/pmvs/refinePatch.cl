@@ -1,4 +1,5 @@
 #define WSIZE <WSIZE>
+#define M_TAU_MAX <M_TAU_MAX>
 const sampler_t imSampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
 
 enum {
@@ -25,7 +26,7 @@ typedef struct _PatchParams {
     float dscale;
     float ascale;
     int nIndexes;
-    int indexes[100];
+    int indexes[M_TAU_MAX];
 } PatchParams;
 
 struct FArgs {

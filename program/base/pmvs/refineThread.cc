@@ -62,6 +62,7 @@ void CrefineThread::initCL() {
     buffer << t.rdbuf();
     std::string pstr = buffer.str();
     strSubstitute(pstr, "<WSIZE>", m_fm.m_wsize);
+    strSubstitute(pstr, "<M_TAU_MAX>", M_TAU_MAX);
     const char *pcstr = pstr.c_str();
     size_t pstrlen = pstr.length();
     cl_int clErr;

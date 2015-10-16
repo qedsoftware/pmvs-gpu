@@ -20,7 +20,7 @@
 #include "option.h"
 
 namespace PMVS3 {
-  
+
 class CfindMatch {
  public:
   CfindMatch(void);

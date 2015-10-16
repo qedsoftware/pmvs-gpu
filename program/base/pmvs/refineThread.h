@@ -18,8 +18,8 @@ namespace PMVS3 {
         REFINE_SUCCESS
     };
 
-#define REFINE_MAX_TASKS 2048
-#define REFINE_QUEUE_LENGTH 4096
+#define REFINE_MAX_TASKS 1536
+#define REFINE_QUEUE_LENGTH 2048
 
     typedef struct _CLImageParams {
         cl_float4 projection[3];
@@ -36,7 +36,7 @@ namespace PMVS3 {
         cl_float dscale;
         cl_float ascale;
         cl_int nIndexes;
-        cl_int indexes[100];
+        cl_int indexes[M_TAU_MAX];
     } CLPatchParams;
 
     typedef boost::shared_ptr<CLPatchParams> PCLPatchParams;
