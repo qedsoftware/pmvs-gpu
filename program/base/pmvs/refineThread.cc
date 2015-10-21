@@ -241,9 +241,8 @@ void CrefineThread::refinePatchesGPU() {
 
   size_t globalWorkOffset = 0;
   size_t globalWorkSize = REFINE_MAX_TASKS;
-  size_t localWorkSize = 256;
   clErr = clEnqueueNDRangeKernel(m_clQueue, m_clKernel, 1, 
-          &globalWorkOffset, &globalWorkSize, &localWorkSize,
+          &globalWorkOffset, &globalWorkSize, NULL,
           0, NULL, NULL);
   if(clErr < 0) {
       printf("error launching kernel %d\n", clErr);

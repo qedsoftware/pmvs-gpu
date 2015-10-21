@@ -515,7 +515,7 @@ __kernel void refinePatch(__read_only image2d_array_t images, /* 0 */
     for(int i=0; i<4; i++) {
         simplexVecs[4*globalId+i] = mySimplexVecs[i];
     }
-    if(state == SIMPLEX_STATE_EXPAND) {
+    if(state == SIMPLEX_STATE_EXPAND || state == SIMPLEX_STATE_CONTRACT) {
         // have to redo an iteration in this case
         // only way to avoid it is to store more global state
         state = SIMPLEX_STATE_REFLECT;

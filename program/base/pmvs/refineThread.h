@@ -18,8 +18,8 @@ namespace PMVS3 {
         REFINE_SUCCESS
     };
 
-#define REFINE_MAX_TASKS 1536
-#define REFINE_QUEUE_LENGTH 2048
+#define REFINE_MAX_TASKS 2048
+#define REFINE_QUEUE_LENGTH 3072
 
     typedef struct _CLImageParams {
         cl_float4 projection[3];

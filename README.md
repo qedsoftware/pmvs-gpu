@@ -1,13 +1,14 @@
 # PMVS-GPU
-This project modifies [PMVS](http://www.di.ens.fr/pmvs/) to use the GPU.
+This project modifies [PMVS](http://www.di.ens.fr/pmvs/) to use the GPU. So far it has only been tested on Ubuntu 14.04 with NVIDIA graphics cards.
 
 ## Requirements
 #### OpenCL 1.2
 Verify OpenCL is configured correctly by running the `clinfo` utility. It should find a GPU device and return lots of info. On Ubuntu, OpenCL appears to be broken when using NVIDIA Ubuntu packages. If OpenCL isn't working, try removing all NVIDIA Ubuntu packages and reinstall drivers using the NVIDIA binary installer downloaded from [http://www.geforce.com/drivers](http://www.geforce.com/drivers).
 
 #### Ubuntu packages
+
 ```
-sudo apt-get install libgsl0-dev libblas-dev libatlas-dev liblapack-dev liblapacke-dev
+sudo apt-get install libgsl0-dev libblas-dev libatlas-dev liblapack-dev opencl-headers libjpeg-dev
 ```
 
 #### Other
