@@ -23,5 +23,16 @@ sudo make install
 ```
 
 ## Using with OpenDroneMap
-After running OpenDroneMap install script:
-`cp program/main/pmvs2 <OpenDroneMap dir>/bin`
+There is a more up-to-date branch of OpenDroneMap called python-port. When the input images have GPS metadata, the point matching step is much faster for large datasets. To use python-port, first clone the OpenDroneMap repository, then check out the branch using git.
+```
+git clone https://github.com/OpenDroneMap/OpenDroneMap.git
+cd OpenDroneMap
+git fetch
+git checkout python-port
+./install.sh
+```
+
+OpenDroneMap comes with the original version of pmvs2. To use pmvs-gpu instead, copy the binary to the OpenDroneMap bin directory.
+```cp <PMVS-GPU dir>/program/main/pmvs2 <OpenDroneMap dir>/bin```
+
+After installing, run OpenDroneMap by launching the `run.py` script from the directory that contains the input images. Note that if you're using the default branch (gh-pages), use `run.pl` instead.
