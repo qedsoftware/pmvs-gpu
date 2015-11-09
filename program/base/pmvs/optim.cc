@@ -560,7 +560,7 @@ void Coptim::setPatchParams(Patch::Cpatch& patch, int id, CLPatchParams &patchPa
   }
   encodedVec.s[3] = 1;
 
-  for(int i=0; i<m_indexesT[id].size(); i++) {
+  for(int i=0; i<size; i++) {
       patchParams.indexes[i] = m_indexesT[id][i];
   }
   if(m_indexesT[id].size() == 0) printf("empty indexes\n");
