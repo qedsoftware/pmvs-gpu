@@ -14,10 +14,13 @@ sudo apt-get install libgsl0-dev libblas-dev libatlas-dev liblapack-dev opencl-h
 #### Other
 * [Graclus](http://www.cs.utexas.edu/users/dml/Software/graclus.html)
 
+   When compiling Graclus be sure to set DNUMBITS to 64 in Makefile.in if you're using a 64 bit system.
+
 ## Build Instructions
 Update `program/main/Makefile` to point to your graclus dir (`YOUR_INCLUDE_METIS_PATH` and `YOUR_LDLIB_PATH`)
 ```
 cd program/main
+make depend
 make
 sudo make install
 ```
